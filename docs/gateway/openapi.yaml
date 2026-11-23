@@ -484,8 +484,12 @@ components:
       type: object
       additionalProperties: false
       description: |
-        Base error fields. Messages never contain tokens, prompt text or other
-        tenants' data (ADR-005).
+        Error detail for every code EXCEPT `budget_exhausted`. That code needs
+        `scope` and `reset_at` and is only valid as `BudgetExhaustedDetail`;
+        excluding it here keeps the two `ErrorResponse` branches disjoint, so a
+        budget error missing either field cannot match the generic branch.
+        Messages never contain tokens, prompt text or other tenants' data
+        (ADR-005).
       required: [code, message, request_id]
       properties:
         code:
@@ -495,7 +499,6 @@ components:
             - unauthenticated
             - forbidden
             - tool_not_allowed
-            - budget_exhausted
             - rate_limited
             - concurrency_limited
             - upstream_error
@@ -512,7 +515,7 @@ components:
     ErrorResponse:
       type: object
       additionalProperties: false
-      description: Generic error envelope (any code). Used for stream `error` events.
+      description: Generic error envelope (any code). Used for stream `error` events. The `error` value is exactly one of the generic detail (any code except `budget_exhausted`) or the budget detail (`budget_exhausted` with `scope` and `reset_at`).
       required: [error]
       properties:
         error:

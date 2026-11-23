@@ -47,7 +47,7 @@ Errors use `{"error": {"code", "message", "request_id"}}`. Each status has its o
 | 503 | `audit_unavailable` | Audit append failed (see audit below) | |
 | 503 | `identity_unavailable` | TokenReview unreachable | |
 
-Messages never contain tokens, prompt text or another tenant's data. Error objects carry no extra fields.
+Messages never contain tokens, prompt text or another tenant's data. Error objects carry no extra fields. `budget_exhausted` is valid only with both `scope` (`agent` or `tenant`) and `reset_at`; the generic error detail cannot carry that code, so a budget error missing either field (or both) is rejected, including as a stream `error` event.
 
 ## Budget window and accounting (ADR-004, ADR-005)
 - **Fixed daily UTC window (owner-accepted).** A window is the UTC calendar day `[00:00:00Z, 24:00:00Z)`, identified by the UTC date of the request's admission time. It resets at 00:00 UTC. It is not a rolling 24-hour window.

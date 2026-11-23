@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "budget_exhausted",
+    "message": "daily token budget reached",
+    "request_id": "req_0001",
+    "scope": "tenant",
+    "reset_at": "2026-11-23T00:00:00Z"
+  }
+}
