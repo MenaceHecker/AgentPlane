@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "chain_id": "acme",
+  "index": 4,
+  "prev_hash": "e0a714d842df9041b74c10d5350b8f5f35c6b19c2243f86dbd93e5ee6d69dad5",
+  "event": "correction",
+  "event_key": "req_0002:correction",
+  "request_id": "req_0002",
+  "timestamp": "2026-11-22T09:00:05.035Z",
+  "tenant": "acme",
+  "agent": "summarizer",
+  "reservation_id": "rsv_0002",
+  "delta_tokens": 1000,
+  "corrected_total": 9192,
+  "reason": "hard_bound_violation",
+  "window": "2026-11-22",
+  "record_hash": "ab700dbcbb203add2eb42f1315f911d67364a05d472477bd762ce83b6a2eb69f"
+}

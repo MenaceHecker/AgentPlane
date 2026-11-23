@@ -35,6 +35,14 @@
     "kind": {"enum": ["model", "tool"]},
     "base": {
       "type": "object",
+      "allOf": [
+        {
+          "description": "Identity rule (ADR-005/006). Only the reserved _platform chain holds requests with no attributable identity; there tenant and agent are both null and the only event is rejected. Every other chain is a tenant chain: tenant and agent are both non-null. That tenant equals chain_id cannot be written as a schema constraint; it is a semantic rule (docs/audit/hash-chain.md).",
+          "if": {"properties": {"chain_id": {"const": "_platform"}}, "required": ["chain_id"]},
+          "then": {"properties": {"event": {"const": "rejected"}, "tenant": {"type": "null"}, "agent": {"type": "null"}}},
+          "else": {"properties": {"tenant": {"type": "string", "minLength": 1}, "agent": {"type": "string", "minLength": 1}}}
+        }
+      ],
       "required": ["version", "chain_id", "index", "prev_hash", "record_hash", "event", "event_key", "request_id", "timestamp", "tenant", "agent"],
       "properties": {
         "version": {"const": 1},
@@ -42,8 +50,8 @@
         "index": {"$ref": "#/$defs/safeInt"},
         "prev_hash": {"$ref": "#/$defs/sha256Hex"},
         "record_hash": {"$ref": "#/$defs/sha256Hex"},
-        "event_key": {"type": "string", "minLength": 3, "maxLength": 200},
-        "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "event_key": {"description": "<request_id>:<event> or <request_id>:correction:<seq>. The per-event shape is enforced below; that the prefix equals request_id is a semantic rule.", "type": "string", "minLength": 3, "maxLength": 200},
+        "request_id": {"description": "Gateway-assigned request id. The character set excludes the colon so that event_key (request_id:event[:seq]) can be derived and split unambiguously.", "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"},
         "timestamp": {"$ref": "#/$defs/timestamp"},
         "tenant": {"type": ["string", "null"], "minLength": 1},
         "agent": {"type": ["string", "null"], "minLength": 1},
@@ -58,6 +66,7 @@
           "required": ["kind", "target", "request_hash", "request_size", "reserved_tokens", "window"],
           "properties": {
             "event": {"const": "admitted"},
+            "event_key": {"pattern": "^[A-Za-z0-9_-]{1,128}:admitted$"},
             "kind": {"$ref": "#/$defs/kind"},
             "target": {"type": "string", "minLength": 1},
             "request_hash": {"$ref": "#/$defs/sha256Hex"},
@@ -77,6 +86,7 @@
           "required": ["kind", "target", "status", "tokens_in", "tokens_out", "charged_tokens", "latency_ms", "usage_source", "overshoot", "response_hash", "response_size", "window"],
           "properties": {
             "event": {"const": "completed"},
+            "event_key": {"pattern": "^[A-Za-z0-9_-]{1,128}:completed$"},
             "kind": {"$ref": "#/$defs/kind"},
             "target": {"type": "string", "minLength": 1},
             "status": {"enum": ["ok", "upstream_error", "upstream_timeout", "cancelled", "budget_cutoff", "abandoned", "unfinalized", "internal_error"]},
@@ -105,6 +115,7 @@
           "required": ["reservation_id", "delta_tokens", "corrected_total", "reason", "window"],
           "properties": {
             "event": {"const": "correction"},
+            "event_key": {"pattern": "^[A-Za-z0-9_-]{1,128}:correction:[1-9][0-9]{0,14}$"},
             "reservation_id": {"type": "string", "minLength": 1},
             "delta_tokens": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
             "corrected_total": {"$ref": "#/$defs/safeInt"},
@@ -123,6 +134,7 @@
           "required": ["kind", "target", "status", "request_hash", "request_size", "latency_ms"],
           "properties": {
             "event": {"const": "rejected"},
+            "event_key": {"pattern": "^[A-Za-z0-9_-]{1,128}:rejected$"},
             "kind": {"oneOf": [{"$ref": "#/$defs/kind"}, {"type": "null"}]},
             "target": {"type": ["string", "null"]},
             "status": {"enum": ["invalid_request", "unauthenticated", "forbidden", "tool_not_allowed", "budget_exhausted", "rate_limited", "concurrency_limited", "audit_unavailable", "identity_unavailable"]},

@@ -1,0 +1,24 @@
+{
+  "chain_id": "_platform",
+  "records": [
+    {
+      "version": 1,
+      "chain_id": "_platform",
+      "index": 0,
+      "prev_hash": "89655a717ae1a4c6b4769bbcb71103d09642a8d32e6b4d9db609c4fc79fa1c7a",
+      "event": "admitted",
+      "event_key": "req_9002:admitted",
+      "request_id": "req_9002",
+      "timestamp": "2026-11-22T09:00:01.007Z",
+      "tenant": null,
+      "agent": null,
+      "kind": "model",
+      "target": "mock-large",
+      "request_hash": "90d7d5a6bbb51f0edd9bdcbd55e262b386e3631e13c1e3bbfaea0a0711214149",
+      "request_size": 1,
+      "reserved_tokens": 1,
+      "window": "2026-11-22",
+      "record_hash": "5239e520edf1065ccc3e14298aec860a4161186ceb3d9d0a39e5b010405b078c"
+    }
+  ]
+}
