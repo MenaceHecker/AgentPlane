@@ -8,7 +8,7 @@ Phase plan: [P0 foundations and design](../agents/plans/P0.md), PLANNED. Plannin
 | --- | --- | --- | --- |
 | P0-T0 | READY_FOR_REVIEW | [Plan](../agents/plans/P0-T0.md), [Run](../agents/runs/P0-T0.md); no PR recorded | README and templates added; gitleaks not installed, rerun after P0-T1. |
 | P0-T1 | READY_FOR_REVIEW | [Plan](../agents/plans/P0-T1.md), [Run](../agents/runs/P0-T1.md), [Review r1](../agents/reviews/P0-T1-r1.md); [Draft PR #3](https://github.com/MenaceHecker/AgentPlane/pull/3) | Review r1 findings 1, 2, 4 fixed; live kind lifecycle and CI (lint, unit-test, gitleaks on 8e931c1) recorded in the run report. Git email verification remains open. |
-| P0-T2 | IN_PROGRESS | [Plan](../agents/plans/P0-T2.md); no PR recorded | P0-T1 merged (PR #3); ADR implementation started on phase-0/adrs. |
+| P0-T2 | READY_FOR_REVIEW | [Plan](../agents/plans/P0-T2.md), [Run](../agents/runs/P0-T2.md); no PR recorded | Six ADRs, template and index written. Accepted vs Proposed content labelled per ADR. Open questions (counter store, unattributable requests, tenant RPM, burst, audit encoding) listed in the run report. CI unverified until a PR run. |
 | P0-T3 | PLANNED | [Plan](../agents/plans/P0-T3.md); no PR recorded | Follows P0-T2 ADR documentation; accepted choices recorded in plan. |
 | P0-T4 | PLANNED | [Plan](../agents/plans/P0-T4.md); no PR recorded | Mock model; requires P0-T3. |
 | P0-T5 | PLANNED | [Plan](../agents/plans/P0-T5.md); no PR recorded | Labeled kind, local quickstart, mock-image scan; requires P0-T4. |
