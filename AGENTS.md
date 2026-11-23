@@ -1,6 +1,6 @@
 # AgentPlane: Shared Agent Guide
 
-Read this file fully at the start of every session, whichever agent you are. It is the source of truth for how work is done in this repo. Requirements live in `docs/AgentPlane_Requirements_and_Phased_Plan.docx`. If this file and the requirements doc disagree, stop and ask the owner.
+Read this file fully at the start of every session, whichever agent you are. It is the source of truth for how work is done in this repo. Requirements live in `AgentPlane_Requirements_and_Phased_Plan.docx` (repo root). If this file and the requirements doc disagree, stop and ask the owner.
 
 Codex reads this file as `AGENTS.md`. Claude Code reads `CLAUDE.md`, which imports this file and adds executor instructions.
 

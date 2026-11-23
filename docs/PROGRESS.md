@@ -2,18 +2,21 @@
 
 Current phase: Phase 0 — foundations and design. No phase exit gate verified.
 
+Phase plan: [P0 foundations and design](../agents/plans/P0.md), PLANNED. Planning branch: `phase-0/foundations-plan`. Task implementation stays on separate task branches.
+
 | Task | Status | Plan / PR | Notes |
 | --- | --- | --- | --- |
-| P0-T0 | Unknown; completion unverified | No PR recorded | Agent guide exists; agent README and templates absent. |
-| P0-T1 | Plan written; owner approval pending | [Plan](../agents/plans/P0-T1.md); no PR recorded | P0-T0 handoff prerequisite remains open. |
-| P0-T2 | Not planned | — | ADRs. |
-| P0-T3 | Not planned | — | API contracts and Go module. |
-| P0-T4 | Not planned | — | Mock model. |
-| P0-T5 | Not planned | — | kind configuration and quickstart. |
+| P0-T0 | READY_FOR_REVIEW | [Plan](../agents/plans/P0-T0.md), [Run](../agents/runs/P0-T0.md); no PR recorded | README and templates added; gitleaks not installed, rerun after P0-T1. |
+| P0-T1 | PLANNED | [Plan](../agents/plans/P0-T1.md); no PR recorded | P0-T0 handoff prerequisite remains open. |
+| P0-T2 | PLANNED | [Plan](../agents/plans/P0-T2.md); no PR recorded | Record accepted architecture, UTC window, tenant chains and signed checkpoint format. |
+| P0-T3 | PLANNED | [Plan](../agents/plans/P0-T3.md); no PR recorded | Follows P0-T2 ADR documentation; accepted choices recorded in plan. |
+| P0-T4 | PLANNED | [Plan](../agents/plans/P0-T4.md); no PR recorded | Mock model; requires P0-T3. |
+| P0-T5 | PLANNED | [Plan](../agents/plans/P0-T5.md); no PR recorded | Labeled kind, local quickstart, mock-image scan; requires P0-T4. |
 
 ## Open questions
-- Requirements read from root-level `AgentPlane_Requirements_and_Phased_Plan.docx`; confirm its canonical location (AGENTS.md names `docs/`). NFR-8/NFR-9 mapped in the plan; full compliance remains future work.
-- Confirm P0-T0 completion or finish its missing handoff artifacts separately.
+- Owner confirmed the root requirements document; P0-T0 corrects the stale AGENTS.md path. Document reviewed; NFR-8/NFR-9 mapped, full compliance remains future work.
+- Complete P0-T0 handoff artifacts before P0-T1 implementation.
+- Owner decisions are ACCEPTED in P0-T2/P0-T3; no decision-approval blocker remains. Signed checkpoints are format-only in Phase 0. Task dependencies and owner phase exit gate remain.
 - Confirm the configured Git email is verified on the owner's GitHub account.
 
 ## Phase 0 exit gate (owner runs)
