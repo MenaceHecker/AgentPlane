@@ -1,0 +1,12 @@
+{
+  "payload": {
+    "version": 1,
+    "chain_id": "other",
+    "count": 8,
+    "head_hash": "25f7bb99e8791978b616d75a6fdad7bef365f08555106478ec7ab483d440e1ed",
+    "timestamp": "2026-11-22T10:00:00Z",
+    "alg": "Ed25519",
+    "key_id": "test-key-2"
+  },
+  "sig": "35F2z7bj9cVwbCfZCK8UT5iSkZSyrouBzF6Qu4DqhVEQtv3VkeUUmh49wM1q/CkP/FVWPvzRksvEK62YWBd+Ag=="
+}

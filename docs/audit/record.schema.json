@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentplane.io/schemas/audit/record.v1.json",
+  "title": "AgentPlane audit chain entry",
+  "description": "One chain entry (event) in a tenant's audit chain. A request has one logical audit trail made of one or more entries sharing request_id (ADR-005 section 6.2, ADR-006). Bodies are never stored: only hashes and sizes (FR-AUD-4). Phase 0 contract only; no audit store exists.",
+  "oneOf": [
+    {"$ref": "#/$defs/admitted"},
+    {"$ref": "#/$defs/completed"},
+    {"$ref": "#/$defs/correction"},
+    {"$ref": "#/$defs/rejected"}
+  ],
+  "$defs": {
+    "sha256Hex": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "chainId": {
+      "description": "A tenant name, or the reserved platform chain id _platform (Proposed in ADR-005/006 for requests with no attributable tenant; not owner-confirmed).",
+      "type": "string",
+      "pattern": "^(_platform|[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$"
+    },
+    "timestamp": {
+      "description": "UTC, exactly millisecond precision: YYYY-MM-DDTHH:MM:SS.mmmZ. Fixed when the event is created, never regenerated on retry.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "window": {
+      "description": "The UTC date of budget admission; settlement always uses the admission window.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "nonNegInt": {"type": "integer", "minimum": 0},
+    "kind": {"enum": ["model", "tool"]},
+    "base": {
+      "type": "object",
+      "required": ["version", "chain_id", "index", "prev_hash", "record_hash", "event", "event_key", "request_id", "timestamp", "tenant", "agent"],
+      "properties": {
+        "version": {"const": 1},
+        "chain_id": {"$ref": "#/$defs/chainId"},
+        "index": {"$ref": "#/$defs/nonNegInt"},
+        "prev_hash": {"$ref": "#/$defs/sha256Hex"},
+        "record_hash": {"$ref": "#/$defs/sha256Hex"},
+        "event_key": {"type": "string", "minLength": 3, "maxLength": 200},
+        "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "timestamp": {"$ref": "#/$defs/timestamp"},
+        "tenant": {"type": ["string", "null"], "minLength": 1},
+        "agent": {"type": ["string", "null"], "minLength": 1},
+        "audit_mode": {"description": "Present only when the demo-only fail-open setting is on (FR-GW-10).", "const": "fail_open"}
+      }
+    },
+    "admitted": {
+      "description": "Appended before anything is forwarded (the audit gate). event_key is <request_id>:admitted.",
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "required": ["kind", "target", "request_hash", "request_size", "reserved_tokens", "window"],
+          "properties": {
+            "event": {"const": "admitted"},
+            "kind": {"$ref": "#/$defs/kind"},
+            "target": {"type": "string", "minLength": 1},
+            "request_hash": {"$ref": "#/$defs/sha256Hex"},
+            "request_size": {"$ref": "#/$defs/nonNegInt"},
+            "reserved_tokens": {"$ref": "#/$defs/nonNegInt"},
+            "window": {"$ref": "#/$defs/window"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "completed": {
+      "description": "Appended after terminal settlement. At most one per request. event_key is <request_id>:completed. For usage_source hard_bound consumption was unknown, tokens_in/tokens_out are null and charged_tokens is the hard bound charged.",
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "required": ["kind", "target", "status", "tokens_in", "tokens_out", "charged_tokens", "latency_ms", "usage_source", "overshoot", "response_hash", "response_size", "window"],
+          "properties": {
+            "event": {"const": "completed"},
+            "kind": {"$ref": "#/$defs/kind"},
+            "target": {"type": "string", "minLength": 1},
+            "status": {"enum": ["ok", "upstream_error", "upstream_timeout", "cancelled", "budget_cutoff", "abandoned", "unfinalized", "internal_error"]},
+            "tokens_in": {"type": ["integer", "null"], "minimum": 0},
+            "tokens_out": {"type": ["integer", "null"], "minimum": 0},
+            "charged_tokens": {"$ref": "#/$defs/nonNegInt"},
+            "latency_ms": {"$ref": "#/$defs/nonNegInt"},
+            "usage_source": {"enum": ["backend_reported", "gateway_counted", "hard_bound"]},
+            "overshoot": {"type": "boolean"},
+            "response_hash": {"oneOf": [{"$ref": "#/$defs/sha256Hex"}, {"type": "null"}]},
+            "response_size": {"$ref": "#/$defs/nonNegInt"},
+            "window": {"$ref": "#/$defs/window"}
+          },
+          "if": {"properties": {"usage_source": {"const": "hard_bound"}}, "required": ["usage_source"]},
+          "then": {"properties": {"tokens_in": {"type": "null"}, "tokens_out": {"type": "null"}}},
+          "else": {"properties": {"tokens_in": {"type": "integer"}, "tokens_out": {"type": "integer"}}}
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "correction": {
+      "description": "Append-only usage correction applied after a terminal state (ADR-004 excess-only rule). event_key is <request_id>:correction:<seq>, seq starting at 1. delta_tokens is never negative: corrections only add.",
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "required": ["reservation_id", "delta_tokens", "corrected_total", "reason", "window"],
+          "properties": {
+            "event": {"const": "correction"},
+            "reservation_id": {"type": "string", "minLength": 1},
+            "delta_tokens": {"type": "integer", "minimum": 1},
+            "corrected_total": {"$ref": "#/$defs/nonNegInt"},
+            "reason": {"enum": ["late_completion_excess", "hard_bound_violation"]},
+            "window": {"$ref": "#/$defs/window"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "rejected": {
+      "description": "Single-event trail for a request rejected before admission. Tenant and agent are null only when no identity could be established (then chain_id is _platform, Proposed).",
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "required": ["kind", "target", "status", "request_hash", "request_size", "latency_ms"],
+          "properties": {
+            "event": {"const": "rejected"},
+            "kind": {"oneOf": [{"$ref": "#/$defs/kind"}, {"type": "null"}]},
+            "target": {"type": ["string", "null"]},
+            "status": {"enum": ["invalid_request", "unauthenticated", "forbidden", "tool_not_allowed", "budget_exhausted", "rate_limited", "concurrency_limited", "audit_unavailable", "identity_unavailable"]},
+            "request_hash": {"$ref": "#/$defs/sha256Hex"},
+            "request_size": {"$ref": "#/$defs/nonNegInt"},
+            "latency_ms": {"$ref": "#/$defs/nonNegInt"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
