@@ -827,6 +827,23 @@ func TestAuditTotalsAreRefusedForInvalidChains(t *testing.T) {
 	if len(m.TotalsRefused) < 10 {
 		t.Fatalf("manifest lists only %d chains whose totals must be refused", len(m.TotalsRefused))
 	}
+	// The totals-refusal list is part of the contract, so specific entries are
+	// required, not merely "enough" of them: the reviewer's counterexamples for
+	// identity, event keys and conflicting repeated keys must stay covered.
+	listed := map[string]bool{}
+	for _, f := range m.TotalsRefused {
+		listed[f] = true
+	}
+	for _, f := range []string{
+		"chain-conflicting-event.json",
+		"chain-null-identity-in-tenant-chain.json",
+		"chain-event-key-other-request.json",
+		"chain-unsafe-integer.json",
+	} {
+		if !listed[f] {
+			t.Errorf("%s must be in totals_refused (its totals must never be accepted)", f)
+		}
+	}
 	for _, file := range m.TotalsRefused {
 		chainID, recs := loadChain(t, file)
 		totals, r := totalsFor(t, chainID, recs)
