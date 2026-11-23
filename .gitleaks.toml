@@ -1,0 +1,14 @@
+title = "AgentPlane gitleaks configuration"
+
+# Keep every default rule.
+[extend]
+useDefault = true
+
+# Deliberately narrow: one file and one rule. go.sum lines are public module
+# checksums ("module version h1:<hash>"); the generic-api-key rule matches
+# module names that contain "api" (for example k8s.io/api, kin-openapi).
+# Do not widen this to other paths or rules.
+[[allowlists]]
+description = "go.sum module checksums matched by generic-api-key"
+targetRules = ["generic-api-key"]
+paths = ['''^go\.sum$''']
