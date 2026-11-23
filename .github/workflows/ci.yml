@@ -1,0 +1,94 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only token, no secrets, no provider calls. No pull_request_target.
+permissions:
+  contents: read
+
+env:
+  PRE_COMMIT_VERSION: "4.7.0"
+  GITLEAKS_VERSION: "8.30.1"
+  GOLANGCI_LINT_VERSION: "2.15.0"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install pre-commit
+        run: pip install "pre-commit==${PRE_COMMIT_VERSION}"
+      - name: Validate pre-commit config
+        run: pre-commit validate-config
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        if: ${{ hashFiles('go.mod') != '' }}
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install golangci-lint
+        if: ${{ hashFiles('go.mod') != '' }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"
+          file="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          curl -fsSLO "${base}/${file}"
+          curl -fsSLO "${base}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt"
+          grep " ${file}\$" "golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt" | sha256sum -c -
+          tar -xzf "${file}" --strip-components=1 -C "${RUNNER_TEMP}" "golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint"
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+      # Runs YAML/merge-conflict/private-key checks, actionlint (workflow
+      # syntax), make fmt-check and make lint. The secrets hook runs in the
+      # gitleaks job, which also scans full history.
+      - name: Hooks (config, workflow syntax, fmt-check, lint)
+        run: SKIP=secrets pre-commit run --all-files --show-diff-on-failure
+
+  unit-test:
+    name: unit-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        if: ${{ hashFiles('go.mod') != '' }}
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Prints "NOT APPLICABLE: Go module not introduced (P0-T3)" until go.mod exists.
+      - name: make test
+        run: make test
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          file="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLO "${base}/${file}"
+          curl -fsSLO "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " ${file}\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "${file}" -C "${RUNNER_TEMP}" gitleaks
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+      - name: Scan full git history
+        run: gitleaks git --redact --no-banner --log-opts="--all" .
+      - name: Scan tracked working tree
+        run: make secrets

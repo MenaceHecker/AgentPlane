@@ -68,6 +68,16 @@ Until a Go module exists (P0-T3) the three Go targets print `NOT APPLICABLE: Go 
 
 Hooks: `pre-commit install --hook-type pre-commit --hook-type pre-push`, then `pre-commit run --all-files` to run everything on demand. Hooks call the same make targets (`make test` runs at pre-push). Validate the configuration with `pre-commit validate-config`.
 
+## CI
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main` with read-only permissions, job timeouts, commit-pinned actions and pinned tool versions (pre-commit 4.7.0, gitleaks 8.30.1, golangci-lint 2.15.0). Three jobs:
+
+- `lint`: `pre-commit validate-config`, then `pre-commit run --all-files` (YAML and private-key checks, `actionlint` workflow syntax validation at v1.7.12, `make fmt-check`, `make lint`).
+- `unit-test`: `make test`.
+- `gitleaks`: `gitleaks git --redact --no-banner --log-opts="--all" .` over full history, plus `make secrets`. This job runs whether or not Go code exists.
+
+While no Go module exists the Go steps print `NOT APPLICABLE: Go module not introduced (P0-T3)`. When `go.mod` appears the workflow installs the declared Go toolchain and golangci-lint and runs the real checks. CI cannot show application correctness yet, and Trivy image scanning is deferred until images exist.
+
 ## Contributing workflow
 
 Work is split between a planner/reviewer agent and an executor agent, coordinated through files. See [`AGENTS.md`](AGENTS.md) and [`agents/README.md`](agents/README.md).
