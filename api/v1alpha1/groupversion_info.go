@@ -35,6 +35,7 @@ var (
 func addKnownTypes(s *runtime.Scheme) error {
 	s.AddKnownTypes(GroupVersion,
 		&Tenant{}, &TenantList{},
+		&Agent{}, &AgentList{},
 	)
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil

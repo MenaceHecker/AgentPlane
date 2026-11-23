@@ -3,6 +3,7 @@ module github.com/MenaceHecker/AgentPlane
 go 1.27.3
 
 require (
+	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
 	sigs.k8s.io/yaml v1.6.0
 )
