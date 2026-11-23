@@ -1,0 +1,11 @@
+{
+  "payload": {
+    "version": 1,
+    "chain_id": "acme",
+    "count": 8,
+    "head_hash": "25f7bb99e8791978b616d75a6fdad7bef365f08555106478ec7ab483d440e1ed",
+    "timestamp": "2026-11-22T10:00:00Z",
+    "alg": "Ed25519",
+    "key_id": "test-key-1"
+  }
+}

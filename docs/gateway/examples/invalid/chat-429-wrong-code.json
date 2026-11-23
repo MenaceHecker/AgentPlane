@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "unauthenticated",
+    "message": "x",
+    "request_id": "req_0001"
+  }
+}

@@ -4,7 +4,7 @@ AgentPlane is a multi-tenant platform on Azure Kubernetes Service (AKS) where te
 
 ## Status
 
-**Phase 0 (foundations), repository bootstrap only.** Nothing described above is implemented yet. This repository currently contains the agent workflow documents, the directory layout and local tooling scaffolding. No Go code, controllers, gateway, audit store or cloud infrastructure exists, and no performance, coverage or cost numbers have been measured.
+**Phase 0 (foundations).** Nothing described above is running yet. This repository contains the agent workflow documents, ADRs, local tooling, the Go module with the Tenant and Agent API types (`api/v1alpha1`, types only: no CRD manifests, controllers or admission validation), and the gateway and audit contracts with fixtures and checks (`docs/gateway`, `docs/audit`). No controller, gateway, audit store, signer or cloud infrastructure exists, and no performance, coverage or cost numbers have been measured.
 
 Progress is tracked in [`docs/PROGRESS.md`](docs/PROGRESS.md). Requirements live in `AgentPlane_Requirements_and_Phased_Plan.docx` at the repo root (currently untracked, managed by the owner). Phases 0-3 run on a local kind cluster only; no cloud resources are used before Phase 4.
 
@@ -20,17 +20,19 @@ Git, GNU Make, Docker and kind for the local cluster; plus the pinned quality to
 | --- | --- | --- |
 | pre-commit | 4.7.0 | `pip install pre-commit==4.7.0` |
 | gitleaks | 8.30.1 | `brew install gitleaks` or a release binary from github.com/gitleaks/gitleaks |
-| golangci-lint | 2.15.0 | needed only once a Go module exists; github.com/golangci/golangci-lint |
-| Go | declared by `go.mod` once it exists (P0-T3) | golang.org/dl |
+| golangci-lint | 2.15.0 | github.com/golangci/golangci-lint |
+| Go | declared by `go.mod` (the `go` directive) | golang.org/dl |
+| Python 3 | 3.8 or newer, standard library only | needed by `make contracts-check` |
 
-The `Makefile` fails with an actionable message if gitleaks (or golangci-lint, when a Go module exists) is missing or not the pinned version. A missing tool is never treated as a pass.
+The `Makefile` fails with an actionable message if gitleaks or golangci-lint is missing or not the pinned version. A missing tool is never treated as a pass.
 
 ## Directory map
 
 | Path | Purpose |
 | --- | --- |
 | `agents/` | Agent handoff protocol: `plans/`, `runs/`, `reviews/`, `templates/` |
-| `api/` | CRD types and API contracts (later tasks) |
+| `api/` | Go types for the `agentplane.io/v1alpha1` Tenant and Agent resources (types only) |
+| `internal/contractcheck/` | Test-only validation of the gateway and audit contracts |
 | `controllers/` | Tenant and Agent controllers (Phase 1) |
 | `gateway/` | LLM and tool gateway (Phase 2) |
 | `mockmodel/` | Deterministic mock model for tests (P0-T4) |
@@ -38,11 +40,11 @@ The `Makefile` fails with an actionable message if gitleaks (or golangci-lint, w
 | `policy/` | Gatekeeper policies (Phase 3) |
 | `infra/terraform/` | Azure infrastructure (Phase 4) |
 | `deploy/` | `base/`, `platform/`, `tenants/` manifests |
-| `docs/` | Progress tracker and `adr/` architecture decision records |
+| `docs/` | Progress tracker, `adr/` decision records, `gateway/` OpenAPI contract, `audit/` record and checkpoint contracts |
 | `experiments/` | Experiment scripts; raw results go in `experiments/results/` |
-| `scripts/` | Helper scripts |
+| `scripts/` | Check scripts and the audit fixture reference calculation (`scripts/contracts/`) |
 
-Directories other than `agents/` and `docs/` are placeholders (`.gitkeep`) at this stage.
+Directories other than `agents/`, `api/`, `docs/`, `internal/` and `scripts/` are placeholders (`.gitkeep`) at this stage.
 
 ## Local cluster commands
 
@@ -63,20 +65,22 @@ Override the name with `KIND_CLUSTER_NAME=<name>`. `kind create cluster` merges 
 | `make lint` | Runs `golangci-lint run ./...` at the pinned version. |
 | `make test` | Runs `go test -race ./...`. |
 | `make secrets` | Scans every tracked working-tree file with gitleaks, redacted output. |
+| `make contracts-check` | Validates the gateway and audit contract fixtures: OpenAPI and JSON Schema validation of positive and negative fixtures, independent recomputation of hashes and signatures, and the audit verification rules. Needs go and python3. |
 
-Until a Go module exists (P0-T3) the three Go targets print `NOT APPLICABLE: Go module not introduced (P0-T3)` and succeed. Once `go.mod` exists they run for real and propagate failures. Go source without a root `go.mod` is an error. The checks live in `scripts/check-go.sh` and `scripts/scan-secrets.sh`.
+The Go module exists (since P0-T3), so the Go targets run for real and propagate failures. Go source without a root `go.mod` is an error, and a repository without Go source and without `go.mod` would report `NOT APPLICABLE` and succeed. The checks live in `scripts/check-go.sh` and `scripts/scan-secrets.sh`.
 
 Hooks: `pre-commit install --hook-type pre-commit --hook-type pre-push`, then `pre-commit run --all-files` to run everything on demand. Hooks call the same make targets (`make test` runs at pre-push). Validate the configuration with `pre-commit validate-config`.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main` with read-only permissions, job timeouts, commit-pinned actions and pinned tool versions (pre-commit 4.7.0, gitleaks 8.30.1, golangci-lint 2.15.0). Three jobs:
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main` with read-only permissions, job timeouts, commit-pinned actions and pinned tool versions (pre-commit 4.7.0, gitleaks 8.30.1, golangci-lint 2.15.0; Go module dependencies pinned in `go.mod` and `go.sum`). Four jobs:
 
 - `lint`: `pre-commit validate-config`, then `pre-commit run --all-files` (YAML and private-key checks, `actionlint` workflow syntax validation at v1.7.12, `make fmt-check`, `make lint`).
-- `unit-test`: `make test`.
+- `unit-test`: `make test` (`go test -race ./...`, including the contract tests).
+- `contracts`: `make contracts-check`.
 - `gitleaks`: `gitleaks git --redact --no-banner --log-opts="--all" .` over full history, plus `make secrets`. This job runs whether or not Go code exists.
 
-While no Go module exists the Go steps print `NOT APPLICABLE: Go module not introduced (P0-T3)`. When `go.mod` appears the workflow installs the declared Go toolchain and golangci-lint and runs the real checks. CI cannot show application correctness yet, and Trivy image scanning is deferred until images exist.
+The workflow installs the Go toolchain declared in `go.mod` and golangci-lint and runs the real checks. CI cannot show controller or gateway correctness yet (none exists), and Trivy image scanning is deferred until images exist.
 
 ## Contributing workflow
 

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "forbidden",
+    "message": "identity is not mapped to an active agent",
+    "request_id": "req_0001"
+  }
+}

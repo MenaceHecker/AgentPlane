@@ -62,3 +62,7 @@ test: ## Run Go unit tests with the race detector
 .PHONY: secrets
 secrets: ## Scan tracked working-tree files with gitleaks (redacted output)
 	@scripts/scan-secrets.sh
+
+.PHONY: contracts-check
+contracts-check: ## Validate gateway and audit contract fixtures (needs go and python3)
+	@scripts/check-contracts.sh

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "upstream_timeout",
+    "message": "backend timed out",
+    "request_id": "req_0001"
+  }
+}

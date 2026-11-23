@@ -1,0 +1,3 @@
+# SSE fixtures must end with a blank line (an event is terminated by an empty line),
+# which git diff --check would otherwise report as a blank line at EOF.
+docs/gateway/examples/streams/*.sse whitespace=-blank-at-eof

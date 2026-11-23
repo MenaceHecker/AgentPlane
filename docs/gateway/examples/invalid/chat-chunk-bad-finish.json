@@ -1,0 +1,13 @@
+{
+  "id": "req_0001",
+  "object": "chat.completion.chunk",
+  "created": 1,
+  "model": "m",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {},
+      "finish_reason": "budget_exhausted"
+    }
+  ]
+}

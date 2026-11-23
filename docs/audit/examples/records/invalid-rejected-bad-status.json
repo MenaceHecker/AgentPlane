@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "chain_id": "acme",
+  "index": 5,
+  "prev_hash": "ab700dbcbb203add2eb42f1315f911d67364a05d472477bd762ce83b6a2eb69f",
+  "event": "rejected",
+  "event_key": "req_0003:rejected",
+  "request_id": "req_0003",
+  "timestamp": "2026-11-22T09:00:06.042Z",
+  "tenant": "acme",
+  "agent": "summarizer",
+  "kind": "model",
+  "target": "mock-large",
+  "status": "ok",
+  "request_hash": "775d41c1e18abe8a874973c22863086ec5b8a4e5e6778f3764b890cfb8e03078",
+  "request_size": 401,
+  "latency_ms": 2,
+  "record_hash": "ee7830ef04f92da491ba32d5d000975274c8d6dbdb741d76b6268be1d90c34c8"
+}

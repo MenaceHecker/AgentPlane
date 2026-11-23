@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "request rate limit reached",
+    "request_id": "req_0001"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "internal_error",
+    "message": "unexpected error",
+    "request_id": "req_0001"
+  }
+}

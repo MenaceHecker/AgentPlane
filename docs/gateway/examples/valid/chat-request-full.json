@@ -1,0 +1,20 @@
+{
+  "model": "mock-large",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Be brief."
+    },
+    {
+      "role": "user",
+      "content": "Summarize this document."
+    }
+  ],
+  "max_tokens": 256,
+  "temperature": 0.2,
+  "top_p": 0.9,
+  "stop": [
+    "END"
+  ],
+  "stream": false
+}

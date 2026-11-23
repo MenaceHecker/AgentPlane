@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "chain_id": "_platform",
+  "index": 0,
+  "prev_hash": "89655a717ae1a4c6b4769bbcb71103d09642a8d32e6b4d9db609c4fc79fa1c7a",
+  "event": "rejected",
+  "event_key": "req_9001:rejected",
+  "request_id": "req_9001",
+  "timestamp": "2026-11-22T09:00:01.007Z",
+  "tenant": null,
+  "agent": null,
+  "kind": null,
+  "target": null,
+  "status": "unauthenticated",
+  "request_hash": "aea13e8ce591ea89365da4c16520528e7e4237075160420cb105e3911555e829",
+  "request_size": 0,
+  "latency_ms": 1,
+  "record_hash": "9eeebd157dce61a05f08e139279e1cd32eb8ca655add819b5972d7acf1dc331e"
+}

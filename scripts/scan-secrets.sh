@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Scan every tracked working-tree file with gitleaks, redacting findings.
-# Reads each file from the working tree (so uncommitted edits are scanned),
+# Reads each file from the working tree (so uncommitted edits are scanned; the
+# file path is known to gitleaks, so findings name the file and line and the
+# narrow path allowlist in .gitleaks.toml applies),
 # and fails if any file has a finding or if the scan itself errors.
 set -euo pipefail
 
@@ -24,7 +26,7 @@ git ls-files -z --cached --deduplicate | {
   while IFS= read -r -d '' f; do
     [ -f "$f" ] || continue
     count=$((count + 1))
-    if ! gitleaks stdin --redact --no-banner --log-level warn --exit-code 1 < "$f" >&2; then
+    if ! gitleaks dir --redact --no-banner --log-level warn --exit-code 1 "$f" >&2; then
       echo "SECRET SCAN FAILED: $f" >&2
       fail=1
     fi

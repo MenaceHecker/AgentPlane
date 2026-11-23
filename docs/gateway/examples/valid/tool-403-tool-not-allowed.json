@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "tool_not_allowed",
+    "message": "tool web-search is not allowed for this agent",
+    "request_id": "req_0001"
+  }
+}

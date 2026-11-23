@@ -1,0 +1,30 @@
+{
+  "description": "SYNTHETIC trusted key registry for contract fixtures. Public keys only. test-key-legacy has a registered algorithm that differs from Ed25519 and exists to test algorithm mismatch.",
+  "keys": [
+    {
+      "key_id": "test-key-1",
+      "alg": "Ed25519",
+      "public_key_hex": "11176b60c7f37985ed2a81069b6be3ced10572d2e467bf3cab9d6ef823237c04",
+      "permitted_chain_ids": [
+        "acme",
+        "_platform"
+      ]
+    },
+    {
+      "key_id": "test-key-2",
+      "alg": "Ed25519",
+      "public_key_hex": "22f7a2737866923d9067e823b6d773f823c4d37fbe0901caad8b101a4e0f7bc5",
+      "permitted_chain_ids": [
+        "other"
+      ]
+    },
+    {
+      "key_id": "test-key-legacy",
+      "alg": "RSA-PSS-SHA256",
+      "public_key_hex": "d2fcc9f7dcb36d492a07a433604df44bda29db27bc24126ad516a94e64780bd2",
+      "permitted_chain_ids": [
+        "acme"
+      ]
+    }
+  ]
+}

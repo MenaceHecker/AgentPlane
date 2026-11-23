@@ -1,0 +1,9 @@
+{
+  "model": "mock-large",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Summarize this document."
+    }
+  ]
+}
