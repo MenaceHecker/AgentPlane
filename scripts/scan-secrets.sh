@@ -20,7 +20,7 @@ count=0
 while IFS= read -r -d '' f; do
   [ -f "$f" ] || continue
   count=$((count + 1))
-  if ! gitleaks stdin --redact --no-banner --exit-code 1 < "$f" >&2; then
+  if ! gitleaks stdin --redact --no-banner --log-level warn --exit-code 1 < "$f" >&2; then
     echo "SECRET SCAN FAILED: $f" >&2
     fail=1
   fi
