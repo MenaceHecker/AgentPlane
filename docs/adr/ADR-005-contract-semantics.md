@@ -65,18 +65,42 @@ Errors use an OpenAI-style envelope: `{"error": {"code": "<code>", "message": "<
 | 429 | `rate_limited` | Per-agent token bucket empty. Distinct code from `budget_exhausted` |
 | 429 | `concurrency_limited` | Agent already has `maxInFlight` requests in flight (ADR-004). Distinct from `budget_exhausted` and `rate_limited`; includes `Retry-After` |
 | 502 / 504 | `upstream_error`, `upstream_timeout` | Model/tool backend failure |
-| 503 | `audit_unavailable` | Audit append not possible; request rejected (FR-GW-10) |
+| 503 | `audit_unavailable` | Admission audit append failed before forwarding, or the final append failed for a non-streaming response that was then withheld (FR-GW-10; section 6) |
 | 503 | `identity_unavailable` | TokenReview unavailable |
 | 500 | `internal_error` | Unexpected |
 
 For streaming, a failure after the response started cannot change the HTTP status. The gateway sends a terminal SSE `data:` event containing the same `error` object, then closes the stream (OpenAI-style `data: [DONE]` follows only on normal completion). A mid-stream budget cut-off uses `budget_exhausted`.
 
-### 6. Usage finalization (Proposed)
+### 6. Usage finalization and audit availability (Proposed; owner decision requested in 6.4)
+
+**6.1 Usage finalization.**
 - Usage becomes **final** when the reservation reaches a terminal state (`settled`, `settled_at_bound` or `released`, ADR-004), not when the backend starts replying. Non-streaming: after the full backend response. Streaming: when the stream ends by completion, client cancellation, budget cut-off or error. Unknown consumption is charged at the reserved bound, never refunded.
-- The audit record is appended **after** finalization so it carries final `tokens_in`, `tokens_out`, `status` and `latency`, plus `reserved_tokens`, the budget `window` id, `usage_source` (`backend_reported`, `gateway_counted` or `reserved_bound`; the last means consumption was unknown and the reserved bound was charged) and an `overshoot` flag. One record per request (FR-AUD-1), including streams (a single record at stream end).
-- If the audit append fails after reconciliation, the client gets `503 audit_unavailable` (non-streaming) or a terminal error event (streaming) and the budget still reflects the real usage (ADR-004).
 - The gateway assigns a unique `request_id` per request. Client retries are new requests and consume budget again; no idempotency key is specified in Phase 0.
 - The request hash is the SHA-256 of the raw request body bytes as received, stored with its size; bodies themselves are not stored by default (FR-AUD-4). Details in ADR-006.
+
+**6.2 Fail-closed audit gate before any work (FR-GW-10).** The audit append of the *final* record cannot, by itself, make the gateway fail closed: if it only happens after the response, an outage is discovered after the backend has done work, and for streams after bytes have reached the client, and those bytes cannot be retracted. So an admitted request has two audit records in its tenant's chain, both carrying the same `request_id`:
+1. an **admission record** (`phase: admitted`: request id, agent, target, `request_hash`/size, `reserved_tokens`, budget `window`), which the gateway must append successfully **before forwarding anything to the backend**. If this append fails, the gateway rejects with `503 audit_unavailable`, forwards nothing, and releases the reservation as *proved no work* (ADR-004). A store that is already down is therefore detected before any work or any bytes;
+2. a **final record** (`phase: final`) appended after terminal settlement, carrying final `tokens_in`, `tokens_out`, `status`, `latency`, the `usage_source` (`backend_reported`, `gateway_counted` or `reserved_bound`; the last means consumption was unknown and the reserved bound was charged), and an `overshoot` flag.
+
+Requests rejected before admission (400, 401, 403, 429, ...) are not admitted and have a single record (`phase: rejected`). Because the request is already being rejected, a failed append for a rejected request does not change the outcome; it increments a counter metric, and this gap in completeness is documented, not hidden.
+
+**6.3 Behavior when the audit store fails.**
+| Case | Behavior | What is guaranteed |
+| --- | --- | --- |
+| Store already down before the request | Admission append fails: `503 audit_unavailable`, nothing forwarded, reservation released | No work done, no bytes delivered, no usage charged |
+| Store goes down after admission, non-streaming response | The gateway holds the (already complete) response until the final append succeeds. If it cannot append within a bounded time (TBD), it discards the response and returns `503 audit_unavailable` | No unaudited response bytes reach the client. Usage is charged at the known actual (ADR-004), so the budget stays honest |
+| Store goes down after admission, **streaming** response | Bytes already sent cannot be retracted. The gateway attempts the final append at stream end (bounded retries, TBD) and, on failure, sends a terminal error event. A recovery step appends the missing `final` record (with the settled usage and a status such as `unfinalized`) when the store returns | A durable admission record exists naming the request, agent, request hash and reserved bound. Usage is charged. No new request is admitted while the store is down (the next admission gate fails). **Not guaranteed:** that a final record exists before bytes are delivered, or that bytes are withheld when the store fails mid-stream |
+| Gateway crashes between admission and final | Recovery settles at the reserved bound (ADR-004) and appends a `final` record with status `abandoned` | Request remains auditable from the admission record |
+The verifier (ADR-006) reports an `admitted` record with no `final` record older than the lease and timeout bound as an *unfinalized request anomaly*; it is not a chain break.
+The demo-only fail-open setting (FR-GW-10) skips the admission gate. When enabled, records carry `audit_mode: fail_open`; it must be off by default and visible in configuration.
+
+**Consequence for streaming (stated plainly).** Strict fail-closed holds at admission for every request. For streams it does not extend to bytes already delivered when the store fails mid-stream. Closing that gap would require either buffering the whole stream until the final append succeeds (which defeats streaming) or durable periodic progress records (cost and complexity not specified here).
+
+**6.4 Owner decision requested.** FR-AUD-1 says "every gateway request shall produce one audit record". With INSERT-only database access (FR-AUD-5), a pending record cannot be updated into a final one, so a pre-forward gate needs a second record. Options:
+- **A (this ADR, recommended):** two records per admitted request (admission then final) and one for a rejected request. Gives a strict gate before any work; reads FR-AUD-1 as "one auditable request, recorded in a linked pair".
+- **B:** one final record plus a pre-forward writability probe. Keeps one record per request but an outage between probe and final append yields unaudited work or bytes.
+- **C:** one final record, with all output held until it is durable. Keeps one record and strict audit-before-delivery but cannot stream incrementally.
+Not decided and not owner-accepted. P0-T3's audit schema must not be finalized around A until this is answered; if the answer is B or C, sections 6.2 to 6.3 and ADR-006 change.
 
 ## Consequences
 - The midnight edge case lets a caller burst to 2 times the daily cap around the reset. A rolling window would remove it but was not chosen; this must be disclosed, not hidden.
@@ -91,8 +115,8 @@ For streaming, a failure after the response started cannot change the HTTP statu
 | FR-GW-4 | UTC-day caps, `budget_exhausted` 429 with scope and `reset_at` | Phase 2 task 3 |
 | FR-GW-5 | Per-agent bucket with burst = RPM, per-replica caveat | Phase 2 task 4 |
 | FR-GW-7/8 | Reservations bound to admission window; stream error semantics | Phase 2 tasks 3, 6 |
-| FR-GW-10 | `audit_unavailable` rejection after still reconciling usage | Phase 2 task 7 |
-| FR-AUD-1/4 | One record per request with final usage; body hash and size only | Phase 2 task 7 |
+| FR-GW-10 | Admission audit gate before forwarding; usage still settled when a later append fails; mid-stream gap stated (section 6) | Phase 2 task 7 |
+| FR-AUD-1/4 | Admission and final record for each admitted request, one for each rejected request (owner decision requested, 6.4); body hash and size only | Phase 2 task 7 |
 | NFR-3 | Conditional overshoot bound via reservations and an in-flight limit (ADR-004); not claimed as met yet | Phase 2 |
 
 ## Validation
@@ -103,6 +127,7 @@ P0-T3 turns this into OpenAPI plus positive and negative fixtures and checks the
 2. Whether the gateway enforces the Tenant's `requestsPerMinute` as an aggregate bucket in addition to per-agent buckets.
 3. Burst capacity: `requestsPerMinute` (chosen here) versus a smaller configurable burst.
 4. TokenReview audience name, result-cache TTL, platform default and maximum `max_tokens` (TBD in P0-T3).
+5. **Audit record model (owner decision requested, 6.4):** two linked records per admitted request (recommended) versus one record per request with a weaker or non-streaming guarantee. Blocks the P0-T3 audit schema.
 
 ## Owner acceptance
 - Evidence: P0-T2 plan, "Accepted owner decisions": "Fixed daily UTC budget window, resetting at 00:00 UTC", with the reset-boundary edge case and the requirement to specify how reservations and streams spanning midnight retain their accounting window. Section 1 implements exactly that.

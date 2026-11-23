@@ -97,7 +97,7 @@ Gateway exposes per-tenant and per-agent `used`, `reserved`, remaining budget, a
 | FR-GW-4 | Per-agent and per-tenant caps checked at admission; 429 `budget_exhausted` | Phase 2 task 3 |
 | FR-GW-7 | Reserve before forwarding, reconcile after with exactly-once, conservative settlement | Phase 2 task 3 |
 | FR-GW-8 | Mid-stream cut-off bounded by reservation | Phase 2 task 6 |
-| FR-GW-10 | Audit failure rejects but still reconciles | Phase 2 task 7 |
+| FR-GW-10 | Admission audit gate before forwarding; usage still settled when a later audit append fails (ADR-005 section 6) | Phase 2 task 7 |
 | NFR-3 | Conditional: zero excess under A1/A2 (or A3/A2); with `maxInFlight = 1`, at most one request's excess when assumptions fail; not guaranteed for `maxInFlight > 1` with failed assumptions. Not claimed as met until the adversarial tests below pass | Phase 2 admission, adversarial tests, looping-agent test, E2 |
 
 ## Validation

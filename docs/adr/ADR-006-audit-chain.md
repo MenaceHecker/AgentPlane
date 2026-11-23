@@ -23,7 +23,7 @@ Each tenant has its own independent chain, keyed by tenant name. Records of diff
 **Proposed:** a reserved chain id `_platform` (not a valid tenant name) holds records for requests with no attributable tenant (for example 401s), so that "every request produces one record" (FR-AUD-1) can hold. Unconfirmed; see ADR-005 open question 1.
 
 ### 2. Record and chain fields (Proposed; exact schema in P0-T3)
-Each record has `chain_id` (tenant), a contiguous `index` starting at 0, `prev_hash`, `record_hash`, and the FR-AUD-1 content: timestamp (UTC), tenant, agent, kind (`model`|`tool`), target name, `tokens_in`, `tokens_out`, status, latency, `request_hash`, `request_size`, `response_hash`, `response_size`, plus the ADR-005 fields (`request_id`, `reserved_tokens`, budget `window`, `usage_source`, `overshoot`). Prompt and response bodies are **not stored by default**, only hashes and sizes (FR-AUD-4). The request hash is SHA-256 over the raw request bytes as received; the response hash is SHA-256 over the bytes sent to the client. Limitation: a hash of a short or guessable prompt can be confirmed by guessing; hashes are not secrecy.
+Each record has `chain_id` (tenant), a contiguous `index` starting at 0, `prev_hash`, `record_hash`, and the FR-AUD-1 content: timestamp (UTC), tenant, agent, kind (`model`|`tool`), target name, `tokens_in`, `tokens_out`, status, latency, `request_hash`, `request_size`, `response_hash`, `response_size`, plus the ADR-005 fields (`request_id`, `phase`, `reserved_tokens`, budget `window`, `usage_source`, `overshoot`). `phase` is `admitted`, `final` or `rejected`: an admitted request has an `admitted` record (appended before anything is forwarded) and a `final` record sharing its `request_id`; a request rejected before admission has one `rejected` record (ADR-005 section 6; the two-record model is a Proposed design pending an owner decision on FR-AUD-1). Prompt and response bodies are **not stored by default**, only hashes and sizes (FR-AUD-4). The request hash is SHA-256 over the raw request bytes as received; the response hash is SHA-256 over the bytes sent to the client. Limitation: a hash of a short or guessable prompt can be confirmed by guessing; hashes are not secrecy.
 
 ### 3. Canonical bytes and hashing (Proposed)
 - Hash: SHA-256. Hex digests are lowercase, 64 characters.
@@ -53,6 +53,7 @@ The verifier (Phase 2 `agentplane audit verify`) reads one chain with the SELECT
 | Insert or duplicate a record | Yes | Duplicate index violates the unique key; a forged insert fails linkage |
 | **Delete the last k records (tail truncation)** | **No** | The remaining prefix is a valid shorter chain. Detectable only against a trusted checkpoint (section 7) |
 | **Rewrite a suffix and recompute every later hash** | **No** | A consistent forged chain verifies. Detectable only if a trusted checkpoint covers an affected record (head hash mismatch) |
+| Admitted request with no `final` record (crash or outage) | Not a chain break | The verifier reports an `admitted` record with no matching `final` older than the lease and timeout bound as an *unfinalized request* anomaly, separately from chain integrity |
 | Gateway never logs a request (omission) | No | Chain integrity is not completeness. Metrics and rejection counters are a separate cross-check, not specified here |
 
 ### 7. Signed checkpoints (format ACCEPTED in outline; details Proposed)
@@ -83,12 +84,12 @@ The verifier (Phase 2 `agentplane audit verify`) reads one chain with the SELECT
 ## Requirement mapping
 | Requirement | How this decision addresses it | Enforced at |
 | --- | --- | --- |
-| FR-AUD-1 | Record fields; `_platform` chain proposal for unattributable requests | Phase 2 task 7 |
+| FR-AUD-1 | Record fields; admission and final record pair per admitted request (owner decision requested); `_platform` chain proposal for unattributable requests | Phase 2 task 7 |
 | FR-AUD-2 | Per-tenant append-only chain, `prev_hash` linkage | Phase 2 task 7 |
 | FR-AUD-3 | Verification procedure and first-broken-index rule (section 6); checkpoint rules for tail truncation | Phase 2 task 8 (CLI); format fixtures in P0-T3 |
 | FR-AUD-4 | Hashes and sizes only, no bodies by default | Phase 2 |
 | FR-AUD-5 | INSERT/SELECT-only writer, SELECT-only verifier (ADR-002) | Phase 2 |
-| FR-GW-10 | Failed append rejects the request | Phase 2 |
+| FR-GW-10 | Failed admission append rejects before any work; later failures per ADR-005 section 6 | Phase 2 |
 
 ## Validation
 P0-T3 provides canonical byte and hash test vectors from an independent reference calculation, negative fixtures (modified, deleted, reordered, truncated), and checkpoint fixtures: valid; altered `count`, `head_hash` or `timestamp`; wrong tenant (`chain_id`); altered `alg` (including `none`, empty and a different supported-looking value); altered `key_id` selecting another trusted key; unknown `key_id`; a valid signature by a key that is not in the trusted registry; registry algorithm different from `payload.alg`; key not permitted for the chain; missing, empty or malformed `sig`; an extra field in the envelope or payload; stale (older, lower `count`); plus the uncheckpointed-tail example. Phase 2 implements the verifier and the E5 tamper experiment (edit a row, `audit verify` names the first broken index). No results exist yet.
