@@ -15,15 +15,24 @@ if [ -n "$want" ]; then
   esac
 fi
 
-fail=0
-count=0
-while IFS= read -r -d '' f; do
-  [ -f "$f" ] || continue
-  count=$((count + 1))
-  if ! gitleaks stdin --redact --no-banner --log-level warn --exit-code 1 < "$f" >&2; then
-    echo "SECRET SCAN FAILED: $f" >&2
-    fail=1
+# pipefail (set above) makes a failed `git ls-files` fail the whole pipeline,
+# and set -e then aborts. An empty file list also fails: a scan of nothing
+# must never be reported as a pass.
+git ls-files -z --cached --deduplicate | {
+  fail=0
+  count=0
+  while IFS= read -r -d '' f; do
+    [ -f "$f" ] || continue
+    count=$((count + 1))
+    if ! gitleaks stdin --redact --no-banner --log-level warn --exit-code 1 < "$f" >&2; then
+      echo "SECRET SCAN FAILED: $f" >&2
+      fail=1
+    fi
+  done
+  if [ "$count" -eq 0 ]; then
+    echo "ERROR: no tracked files were scanned; refusing to report success." >&2
+    exit 1
   fi
-done < <(git ls-files -z --cached --deduplicate)
-echo "secrets: scanned $count tracked files, exit $fail"
-exit "$fail"
+  echo "secrets: scanned $count tracked files, exit $fail"
+  exit "$fail"
+}
