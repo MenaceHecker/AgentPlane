@@ -27,7 +27,7 @@ Phase 0 locks the contracts before the gateway exists. Several behaviors are not
 **Reservations and streams spanning midnight (specification; enforcement is later work).**
 - A reservation records the window id of its admission and settles into that window regardless of when the request completes. A request admitted at 23:59:59Z on day D that completes at 00:00:05Z on day D+1 charges day D only. It neither consumes day D+1's allowance (no double count) nor vanishes (no loss).
 - A stream is bounded by its reservation (ADR-004). It is not cut off merely because midnight passed; all of its tokens charge the admission window.
-- Consequently day D's `used + reserved` can never exceed day D's cap even for requests finishing after midnight, and at midnight the new window starts at `used = 0`, `reserved = 0` for new admissions. Outstanding reservations from day D remain attached to day D until settled or expired (ADR-004 crash recovery).
+- Consequently the admission invariant (`used + reserved + R <= cap`, ADR-004) is evaluated against day D's counters even for requests finishing after midnight, and at midnight the new window starts at `used = 0`, `reserved = 0` for new admissions. Final `used` can exceed the cap only by the excess defined in ADR-004 (zero when its assumptions hold), not because of the reset. Outstanding reservations from day D remain attached to day D until settled or expired (ADR-004 crash recovery).
 - Budget configuration is read at admission. A changed cap applies to later admissions only; in-flight requests are not retroactively cancelled. If a cap is lowered below current `used`, further admissions in that window are rejected until reset.
 
 ### 2. Rate limits and burst (Proposed)
@@ -63,6 +63,7 @@ Errors use an OpenAI-style envelope: `{"error": {"code": "<code>", "message": "<
 | 403 | `forbidden`, `tool_not_allowed` | See section 4 |
 | 429 | `budget_exhausted` | Daily token budget (agent or tenant scope) would be exceeded (FR-GW-4) |
 | 429 | `rate_limited` | Per-agent token bucket empty. Distinct code from `budget_exhausted` |
+| 429 | `concurrency_limited` | Agent already has `maxInFlight` requests in flight (ADR-004). Distinct from `budget_exhausted` and `rate_limited`; includes `Retry-After` |
 | 502 / 504 | `upstream_error`, `upstream_timeout` | Model/tool backend failure |
 | 503 | `audit_unavailable` | Audit append not possible; request rejected (FR-GW-10) |
 | 503 | `identity_unavailable` | TokenReview unavailable |
@@ -92,7 +93,7 @@ For streaming, a failure after the response started cannot change the HTTP statu
 | FR-GW-7/8 | Reservations bound to admission window; stream error semantics | Phase 2 tasks 3, 6 |
 | FR-GW-10 | `audit_unavailable` rejection after still reconciling usage | Phase 2 task 7 |
 | FR-AUD-1/4 | One record per request with final usage; body hash and size only | Phase 2 task 7 |
-| NFR-3 | Bounded overshoot via reservations (ADR-004) | Phase 2 |
+| NFR-3 | Conditional overshoot bound via reservations and an in-flight limit (ADR-004); not claimed as met yet | Phase 2 |
 
 ## Validation
 P0-T3 turns this into OpenAPI plus positive and negative fixtures and checks them with `make contracts-check`. Phase 2 adds a midnight-boundary test (injectable clock), identity tests including spoofed body fields, error-code tests, and stream cut-off tests.
