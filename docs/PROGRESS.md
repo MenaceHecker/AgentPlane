@@ -7,7 +7,7 @@ Phase plan: [P0 foundations and design](../agents/plans/P0.md), PLANNED. Plannin
 | Task | Status | Plan / PR | Notes |
 | --- | --- | --- | --- |
 | P0-T0 | READY_FOR_REVIEW | [Plan](../agents/plans/P0-T0.md), [Run](../agents/runs/P0-T0.md); no PR recorded | README and templates added; gitleaks not installed, rerun after P0-T1. |
-| P0-T1 | READY_FOR_REVIEW | [Plan](../agents/plans/P0-T1.md), [Run](../agents/runs/P0-T1.md); no PR recorded | Local checks pass. Blocked/unverified: live kind lifecycle (needs owner approval), CI run (needs PR), git email verification. |
+| P0-T1 | CHANGES_REQUESTED | [Plan](../agents/plans/P0-T1.md), [Run](../agents/runs/P0-T1.md), [Review r1](../agents/reviews/P0-T1-r1.md); no PR recorded | Fix secret-scan and kind discovery error handling; complete live kind/CI evidence and reproducible fixture commands. Git email verification remains open. |
 | P0-T2 | PLANNED | [Plan](../agents/plans/P0-T2.md); no PR recorded | Record accepted architecture, UTC window, tenant chains and signed checkpoint format. |
 | P0-T3 | PLANNED | [Plan](../agents/plans/P0-T3.md); no PR recorded | Follows P0-T2 ADR documentation; accepted choices recorded in plan. |
 | P0-T4 | PLANNED | [Plan](../agents/plans/P0-T4.md); no PR recorded | Mock model; requires P0-T3. |
