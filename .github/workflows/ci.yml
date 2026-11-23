@@ -112,3 +112,9 @@ jobs:
         run: gitleaks git --redact --no-banner --log-opts="--all" .
       - name: Scan tracked working tree
         run: make secrets
+      # gitleaks' built-in config skips go.sum in path-aware scans, so go.sum
+      # is scanned separately: its history here and its working tree above.
+      - name: Scan go.sum history
+        run: make secrets-history
+      - name: Secret scanner regression tests
+        run: make secrets-selftest
