@@ -233,15 +233,18 @@ func verifyChain(t testing.TB, chainID string, recs []obj) result {
 	return verifyChainWith(t, chainID, recs, true)
 }
 
-// verifyStructure is verifyChain without the duplicate-event rule. Usage totals
-// are only accepted for chains that pass it: duplicates are tolerated there
-// because totals count distinct event keys, but a chain with a broken link,
-// inconsistent identity or a wrong event key is never summed.
+// verifyStructure is verifyChain minus the duplicate_event anomaly. Usage totals
+// are only accepted for chains that pass it. An IDENTICAL repeat of an event
+// (a retried append) is tolerated there because totals count each distinct
+// event key once; a repeat with DIFFERENT content for the same key is a
+// conflict and is never tolerated, since deduplication would silently pick one
+// of two disagreeing events. A broken link, inconsistent identity or wrong
+// event key is never summed either.
 func verifyStructure(t testing.TB, chainID string, recs []obj) result {
 	return verifyChainWith(t, chainID, recs, false)
 }
 
-func verifyChainWith(t testing.TB, chainID string, recs []obj, checkDuplicates bool) result {
+func verifyChainWith(t testing.TB, chainID string, recs []obj, reportIdenticalDuplicates bool) result {
 	byIndex := map[int][]obj{}
 	maxIdx := -1
 	for _, r := range recs {
@@ -282,19 +285,20 @@ func verifyChainWith(t testing.TB, chainID string, recs []obj, checkDuplicates b
 	if r := checkSemantics(chainID, ordered); !r.OK {
 		return r
 	}
-	if !checkDuplicates {
-		return result{OK: true}
-	}
-	// Each event_key at most once. Duplicates link correctly, so the hash
-	// checks above cannot see them.
+	// Each event_key at most once. Repeats link correctly, so the hash checks
+	// above cannot see them. A conflicting repeat is always a failure; an
+	// identical repeat is a failure only for the full verifier.
 	first := map[string]obj{}
 	for e, r := range ordered {
 		key, _ := r["event_key"].(string)
 		if prior, seen := first[key]; seen {
-			if string(canonicalBytes(t, contentWithoutLinkage(prior))) == string(canonicalBytes(t, contentWithoutLinkage(r))) {
+			if string(canonicalBytes(t, contentWithoutLinkage(prior))) != string(canonicalBytes(t, contentWithoutLinkage(r))) {
+				return fail("conflicting_event", e)
+			}
+			if reportIdenticalDuplicates {
 				return fail("duplicate_event", e)
 			}
-			return fail("conflicting_event", e)
+			continue
 		}
 		first[key] = r
 	}
@@ -829,6 +833,33 @@ func TestAuditTotalsAreRefusedForInvalidChains(t *testing.T) {
 		if r.OK || totals != nil {
 			t.Errorf("%s: totals were accepted (%v) although the chain is invalid", file, totals)
 		}
+	}
+}
+
+// Repeated event keys: identical content is a retry (totals count the key once,
+// the verifier still reports the duplicate), different content is a conflict
+// and must never be summed (review r2 finding 2).
+func TestAuditTotalsRefuseConflictingEventsButTolerateIdenticalDuplicates(t *testing.T) {
+	id, conflict := loadChain(t, "chain-conflicting-event.json")
+	if totals, r := totalsFor(t, id, conflict); r.OK || totals != nil || r.Reason != "conflicting_event" {
+		t.Errorf("totals for a chain with conflicting content under one event_key must be refused as conflicting_event, got totals=%v result=%+v", totals, r)
+	}
+	if r := verifyChain(t, id, conflict); r.OK || r.Reason != "conflicting_event" {
+		t.Errorf("verifier must still report conflicting_event, got %+v", r)
+	}
+	id, dup := loadChain(t, "chain-duplicate-correction.json")
+	totals, r := totalsFor(t, id, dup)
+	if !r.OK {
+		t.Fatalf("identical duplicates must not block totals: %+v", r)
+	}
+	if got := totals["req_0002"]; got != 9192 {
+		t.Errorf("distinct-key total for req_0002 = %d, want 9192", got)
+	}
+	if naive := usageTotals(dup, false)["req_0002"]; naive == totals["req_0002"] {
+		t.Errorf("fixture does not show the double count (naive %d)", naive)
+	}
+	if r := verifyChain(t, id, dup); r.OK || r.Reason != "duplicate_event" {
+		t.Errorf("verifier must still report duplicate_event, got %+v", r)
 	}
 }
 

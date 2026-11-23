@@ -831,6 +831,7 @@
     "chain-event-key-correction-seq-zero.json",
     "chain-event-key-correction-seq-gap.json",
     "chain-request-identity-inconsistent.json",
+    "chain-conflicting-event.json",
     "chain-modified.json",
     "chain-modified-rehashed.json",
     "chain-deleted-middle.json",
