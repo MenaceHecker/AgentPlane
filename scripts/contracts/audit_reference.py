@@ -13,6 +13,12 @@ Specification followed (docs/audit/hash-chain.md, ADR-006):
                   strings, booleans, null and integers, for which
                   json.dumps(sort_keys=True, separators=(',', ':'),
                   ensure_ascii=False) is byte-identical to RFC 8785.
+  integer domain  Every number must be a non-negative integer in 0..2^53-1
+                  (9007199254740991), written as plain decimal digits. RFC 8785
+                  serializes numbers as IEEE-754 binary64, so larger integers
+                  would be rounded and distinct values would silently share
+                  canonical bytes. Values outside the domain are rejected
+                  BEFORE canonicalization (ValueError), never rounded.
   record_hash     SHA-256("agentplane.audit.record.v1\\n" || JCS(record without record_hash))
   genesis         SHA-256("agentplane.audit.genesis.v1:" || chain_id)
   checkpoint      sig = Ed25519("agentplane.audit.checkpoint.v1\\n" || JCS(payload))
@@ -32,6 +38,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,23 +51,42 @@ CHECKPOINT_DOMAIN = b"agentplane.audit.checkpoint.v1\n"
 # ---------------------------------------------------------------- canonical form
 
 
+MAX_SAFE_INTEGER = 2**53 - 1  # 9007199254740991, the lossless binary64 integer range
+
+_INT_TEXT = re.compile(r"^(0|[1-9][0-9]*)$")
+
+
+def check_integer_text(text):
+    """True if a JSON number text is a plain non-negative decimal integer within the safe range."""
+    return bool(_INT_TEXT.match(text)) and int(text) <= MAX_SAFE_INTEGER
+
+
 def jcs(obj):
     """RFC 8785 canonical bytes for the restricted value space used here."""
-    _reject_floats(obj)
+    _check_domain(obj)
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def _reject_floats(o):
+def _check_domain(o):
+    """Reject anything outside the contract's value space before canonicalizing."""
     if isinstance(o, float):
         raise ValueError("floats are not allowed in canonical audit data")
+    if isinstance(o, bool) or o is None or isinstance(o, str):
+        return
+    if isinstance(o, int):
+        if o < 0 or o > MAX_SAFE_INTEGER:
+            raise ValueError("integer %d is outside the safe range 0..%d" % (o, MAX_SAFE_INTEGER))
+        return
     if isinstance(o, dict):
         for k, v in o.items():
             if not k.isascii():
                 raise ValueError("non-ASCII keys are not allowed")
-            _reject_floats(v)
+            _check_domain(v)
     elif isinstance(o, list):
         for v in o:
-            _reject_floats(v)
+            _check_domain(v)
+    else:
+        raise ValueError("unsupported value type %s" % type(o).__name__)
 
 
 def sha256_hex(b):
@@ -431,6 +457,56 @@ def build():
         "key_label_rule": "seed = SHA-256('agentplane contract fixture key: ' + label), label 'key-1'",
     }
     put("vectors.json", vec)
+
+    # ---- integer domain: boundary vectors and fixtures (review finding: 2^53 collapse)
+    def boundary_record(n):
+        return make_record(TENANT, 0, genesis_hash(TENANT), "admitted", **dict(common("req_b001", "req_b001:admitted", 1), kind="model", target="mock-large", request_hash=fake_hash("boundary"), request_size=1, reserved_tokens=n, window=WINDOW))
+    accepted = []
+    for n in (0, 1, MAX_SAFE_INTEGER - 1, MAX_SAFE_INTEGER):
+        r = boundary_record(n)
+        body = {k: v for k, v in r.items() if k != "record_hash"}
+        accepted.append({"reserved_tokens": n, "canonical": jcs(body).decode(), "record_hash": r["record_hash"]})
+    rejected = []
+    for text, why in (("9007199254740992", "2^53: first integer binary64 cannot distinguish from its neighbour"),
+                      ("9007199254740993", "2^53+1: a binary64 serializer prints 9007199254740992"),
+                      ("18446744073709551616", "2^64"), ("-1", "negative"), ("-0", "negative zero text"),
+                      ("1.0", "fractional notation"), ("1e3", "exponent notation"), ("01", "leading zero")):
+        assert not check_integer_text(text), text
+        rejected.append({"text": text, "reason": why})
+    # the reference itself must refuse to canonicalize out-of-domain values
+    for bad in (MAX_SAFE_INTEGER + 1, MAX_SAFE_INTEGER + 2, -1, 1.0):
+        try:
+            jcs({"n": bad})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("reference canonicalized an out-of-domain value: %r" % (bad,))
+    put("boundary-vectors.json", {
+        "description": "Safe-integer domain vectors. Accepted values are canonicalized and hashed by the Python reference; the Go tests recompute them. Rejected number texts must be refused before canonicalization by both implementations.",
+        "max_safe_integer": MAX_SAFE_INTEGER,
+        "accepted": accepted,
+        "rejected_number_texts": rejected,
+        "collapse_hazard": {"a": "9007199254740992", "b": "9007199254740993",
+                            "note": "A binary64 (RFC 8785) serializer prints both as 9007199254740992; Python integers keep them distinct. Hence the domain limit."},
+    })
+    adm0 = acme[0]
+    def with_field(base, **kw):
+        r = copy.deepcopy(base); r.update(kw); return r
+    put("records/valid-boundary-max-safe-integers.json", boundary_record(MAX_SAFE_INTEGER))
+    put("records/invalid-unsafe-reserved-tokens-2pow53.json", with_field(adm0, reserved_tokens=MAX_SAFE_INTEGER + 1))
+    put("records/invalid-unsafe-reserved-tokens-2pow53-plus1.json", with_field(adm0, reserved_tokens=MAX_SAFE_INTEGER + 2))
+    put("records/invalid-unsafe-request-size.json", with_field(adm0, request_size=2**63))
+    put("records/invalid-unsafe-index.json", with_field(adm0, index=MAX_SAFE_INTEGER + 1))
+    put("records/invalid-unsafe-charged-tokens.json", with_field(acme[1], charged_tokens=MAX_SAFE_INTEGER + 1))
+    put("records/invalid-unsafe-tokens-in.json", with_field(acme[1], tokens_in=MAX_SAFE_INTEGER + 1))
+    put("records/invalid-unsafe-delta-tokens.json", with_field(acme[4], delta_tokens=MAX_SAFE_INTEGER + 1))
+    put("records/invalid-unsafe-corrected-total.json", with_field(acme[4], corrected_total=MAX_SAFE_INTEGER + 1))
+    # a chain whose first entry carries an out-of-domain value (the stored hash is the original one)
+    c = copy.deepcopy(acme); c[0]["reserved_tokens"] = MAX_SAFE_INTEGER + 2
+    put("chain-unsafe-integer.json", chain_doc(TENANT, c))
+    # checkpoints with an out-of-domain count (signature is the valid checkpoint's: malformed is found first)
+    put("checkpoint-unsafe-count.json", dict(cp, payload=dict(cp["payload"], count=MAX_SAFE_INTEGER + 2)))
+    put("checkpoint-max-safe-count.json", dict(cp, payload=dict(cp["payload"], count=MAX_SAFE_INTEGER)))
     return files
 
 

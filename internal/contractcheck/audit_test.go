@@ -102,13 +102,60 @@ func decodeExact(raw []byte, out any) error {
 	return d.Decode(out)
 }
 
-func canonicalBytes(t testing.TB, v any) []byte {
-	t.Helper()
+// maxSafeInteger is 2^53-1, the largest integer a binary64 canonicalizer
+// (RFC 8785 serializes numbers as IEEE-754 doubles) represents exactly.
+const maxSafeInteger = 9007199254740991
+
+var integerText = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+
+// checkSafeNumbers enforces the contract's numeric domain BEFORE
+// canonicalization: every number must be a plain non-negative decimal integer
+// no larger than maxSafeInteger. Without this guard the jcs library silently
+// rounds, so 9007199254740993 would canonicalize as 9007199254740992 and two
+// distinct values would share canonical bytes.
+func checkSafeNumbers(v any) error {
+	switch x := v.(type) {
+	case json.Number:
+		if !integerText.MatchString(x.String()) {
+			return fmt.Errorf("number %q is not a plain non-negative decimal integer", x.String())
+		}
+		n, err := x.Int64()
+		if err != nil || n > maxSafeInteger {
+			return fmt.Errorf("integer %s is outside the safe range 0..%d", x.String(), int64(maxSafeInteger))
+		}
+	case float64:
+		return fmt.Errorf("floating point value %v is not allowed", x)
+	case map[string]any: // also obj, which is an alias
+		for _, e := range x {
+			if err := checkSafeNumbers(e); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, e := range x {
+			if err := checkSafeNumbers(e); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// canonicalize returns the RFC 8785 bytes, refusing out-of-domain numbers.
+func canonicalize(v any) ([]byte, error) {
+	if err := checkSafeNumbers(v); err != nil {
+		return nil, err
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	out, err := jcs.Transform(b)
+	return jcs.Transform(b)
+}
+
+func canonicalBytes(t testing.TB, v any) []byte {
+	t.Helper()
+	out, err := canonicalize(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,6 +248,9 @@ func verifyChain(t testing.TB, chainID string, recs []obj) result {
 			return fail("duplicate_index", e)
 		}
 		r := rs[0]
+		if err := checkSafeNumbers(r); err != nil {
+			return fail("unsafe_integer", e)
+		}
 		if r["prev_hash"] != prev {
 			return fail("prev_hash_mismatch", e)
 		}
@@ -311,6 +361,9 @@ func parseCheckpoint(raw []byte) (*checkpoint, string) {
 	}
 	cn, ok := p["count"].(json.Number)
 	if !ok {
+		return nil, "malformed"
+	}
+	if checkSafeNumbers(p) != nil { // count (and version) must be safe plain integers
 		return nil, "malformed"
 	}
 	count, err := cn.Int64()
@@ -642,7 +695,7 @@ func TestAuditTotalsUseDistinctEventKeys(t *testing.T) {
 // schema check, so no fixture is dead weight.
 func TestAuditFixturesAreAllReferenced(t *testing.T) {
 	m := loadAuditManifest(t)
-	used := map[string]bool{"manifest.json": true, "vectors.json": true, "key-registry.json": true}
+	used := map[string]bool{"manifest.json": true, "vectors.json": true, "boundary-vectors.json": true, "key-registry.json": true}
 	for _, c := range m.Cases {
 		used[c.Chain] = true
 		for _, f := range c.Checkpoints {

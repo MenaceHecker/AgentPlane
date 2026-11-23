@@ -26,7 +26,12 @@
       "type": "string",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
     },
-    "nonNegInt": {"type": "integer", "minimum": 0},
+    "safeInt": {
+      "description": "Non-negative integer in the lossless range 0 to 2^53-1 (9007199254740991). Larger values are outside the audit contract: they would be rounded by binary64 canonicalizers (RFC 8785) and make distinct values collide in the canonical bytes. Numbers must be written as plain decimal integers (no fraction, exponent, sign or leading zeros).",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "kind": {"enum": ["model", "tool"]},
     "base": {
       "type": "object",
@@ -34,7 +39,7 @@
       "properties": {
         "version": {"const": 1},
         "chain_id": {"$ref": "#/$defs/chainId"},
-        "index": {"$ref": "#/$defs/nonNegInt"},
+        "index": {"$ref": "#/$defs/safeInt"},
         "prev_hash": {"$ref": "#/$defs/sha256Hex"},
         "record_hash": {"$ref": "#/$defs/sha256Hex"},
         "event_key": {"type": "string", "minLength": 3, "maxLength": 200},
@@ -56,8 +61,8 @@
             "kind": {"$ref": "#/$defs/kind"},
             "target": {"type": "string", "minLength": 1},
             "request_hash": {"$ref": "#/$defs/sha256Hex"},
-            "request_size": {"$ref": "#/$defs/nonNegInt"},
-            "reserved_tokens": {"$ref": "#/$defs/nonNegInt"},
+            "request_size": {"$ref": "#/$defs/safeInt"},
+            "reserved_tokens": {"$ref": "#/$defs/safeInt"},
             "window": {"$ref": "#/$defs/window"}
           }
         }
@@ -75,14 +80,14 @@
             "kind": {"$ref": "#/$defs/kind"},
             "target": {"type": "string", "minLength": 1},
             "status": {"enum": ["ok", "upstream_error", "upstream_timeout", "cancelled", "budget_cutoff", "abandoned", "unfinalized", "internal_error"]},
-            "tokens_in": {"type": ["integer", "null"], "minimum": 0},
-            "tokens_out": {"type": ["integer", "null"], "minimum": 0},
-            "charged_tokens": {"$ref": "#/$defs/nonNegInt"},
-            "latency_ms": {"$ref": "#/$defs/nonNegInt"},
+            "tokens_in": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991},
+            "tokens_out": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991},
+            "charged_tokens": {"$ref": "#/$defs/safeInt"},
+            "latency_ms": {"$ref": "#/$defs/safeInt"},
             "usage_source": {"enum": ["backend_reported", "gateway_counted", "hard_bound"]},
             "overshoot": {"type": "boolean"},
             "response_hash": {"oneOf": [{"$ref": "#/$defs/sha256Hex"}, {"type": "null"}]},
-            "response_size": {"$ref": "#/$defs/nonNegInt"},
+            "response_size": {"$ref": "#/$defs/safeInt"},
             "window": {"$ref": "#/$defs/window"}
           },
           "if": {"properties": {"usage_source": {"const": "hard_bound"}}, "required": ["usage_source"]},
@@ -101,8 +106,8 @@
           "properties": {
             "event": {"const": "correction"},
             "reservation_id": {"type": "string", "minLength": 1},
-            "delta_tokens": {"type": "integer", "minimum": 1},
-            "corrected_total": {"$ref": "#/$defs/nonNegInt"},
+            "delta_tokens": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "corrected_total": {"$ref": "#/$defs/safeInt"},
             "reason": {"enum": ["late_completion_excess", "hard_bound_violation"]},
             "window": {"$ref": "#/$defs/window"}
           }
@@ -122,8 +127,8 @@
             "target": {"type": ["string", "null"]},
             "status": {"enum": ["invalid_request", "unauthenticated", "forbidden", "tool_not_allowed", "budget_exhausted", "rate_limited", "concurrency_limited", "audit_unavailable", "identity_unavailable"]},
             "request_hash": {"$ref": "#/$defs/sha256Hex"},
-            "request_size": {"$ref": "#/$defs/nonNegInt"},
-            "latency_ms": {"$ref": "#/$defs/nonNegInt"}
+            "request_size": {"$ref": "#/$defs/safeInt"},
+            "latency_ms": {"$ref": "#/$defs/safeInt"}
           }
         }
       ],

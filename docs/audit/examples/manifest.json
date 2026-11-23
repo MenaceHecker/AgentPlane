@@ -395,6 +395,43 @@
         "first_broken_index": null
       },
       "why": ""
+    },
+    {
+      "name": "integer outside the safe range is rejected before canonicalization",
+      "chain": "chain-unsafe-integer.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "unsafe_integer",
+        "first_broken_index": 0
+      },
+      "why": "2^53+1 would collapse to 2^53 in a binary64 canonicalizer"
+    },
+    {
+      "name": "checkpoint count above the safe range is malformed",
+      "chain": "chain-valid.json",
+      "checkpoints": [
+        "checkpoint-unsafe-count.json"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "malformed",
+        "first_broken_index": null
+      },
+      "why": ""
+    },
+    {
+      "name": "checkpoint count at the safe maximum parses but its signature does not match",
+      "chain": "chain-valid.json",
+      "checkpoints": [
+        "checkpoint-max-safe-count.json"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "bad_signature",
+        "first_broken_index": null
+      },
+      "why": ""
     }
   ],
   "checkpoint_schema": [
@@ -439,6 +476,10 @@
       "schema_valid": true
     },
     {
+      "file": "checkpoint-max-safe-count.json",
+      "schema_valid": true
+    },
+    {
       "file": "checkpoint-missing-sig.json",
       "schema_valid": false
     },
@@ -453,6 +494,10 @@
     {
       "file": "checkpoint-unknown-key.json",
       "schema_valid": true
+    },
+    {
+      "file": "checkpoint-unsafe-count.json",
+      "schema_valid": false
     },
     {
       "file": "checkpoint-unsupported-version.json",
@@ -533,6 +578,38 @@
       "valid": false
     },
     {
+      "file": "records/invalid-unsafe-charged-tokens.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-corrected-total.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-delta-tokens.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-index.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-request-size.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-reserved-tokens-2pow53-plus1.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-reserved-tokens-2pow53.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-tokens-in.json",
+      "valid": false
+    },
+    {
       "file": "records/invalid-uppercase-hash.json",
       "valid": false
     },
@@ -542,6 +619,10 @@
     },
     {
       "file": "records/valid-admitted.json",
+      "valid": true
+    },
+    {
+      "file": "records/valid-boundary-max-safe-integers.json",
       "valid": true
     },
     {

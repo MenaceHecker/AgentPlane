@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "chain_id": "acme",
+  "index": 0,
+  "prev_hash": "6e1d8faf6390a3f1d850e914712d7d6adf8a9373e2e390277112596c80576a60",
+  "event": "admitted",
+  "event_key": "req_b001:admitted",
+  "request_id": "req_b001",
+  "timestamp": "2026-11-22T09:00:01.007Z",
+  "tenant": "acme",
+  "agent": "summarizer",
+  "kind": "model",
+  "target": "mock-large",
+  "request_hash": "5079a8a874284530bae1ae120b97bcb970e93fd087557315bae30c43b48f0448",
+  "request_size": 1,
+  "reserved_tokens": 9007199254740991,
+  "window": "2026-11-22",
+  "record_hash": "594b1d91c1e80b129751d6856f67b6e45ca9a5e91b18ee4ab0ea1b44ef87ac33"
+}

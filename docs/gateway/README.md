@@ -28,6 +28,8 @@ The chat endpoint accepts only this subset; any other field is rejected.
 | `stream` | yes | Boolean, default false |
 | `tools`, `functions`, `tool_choice`, `n`, `logprobs`, `response_format`, `seed`, `user`, penalties, `stream_options` | **no** | Rejected as `invalid_request`. The terminal usage chunk is always sent when streaming, so `stream_options` is unnecessary |
 
+Token counts (`max_tokens` and every `usage` field) are limited to the safe-integer range `0..9007199254740991` (2^53-1), the same domain as the audit contract: larger integers cannot be canonicalized losslessly (`docs/audit/hash-chain.md`). A request above it is `400 invalid_request`.
+
 Responses use OpenAI field names (`usage.prompt_tokens`, `completion_tokens`, `total_tokens`). The completion `id` equals the gateway-assigned `request_id`, which is also the `X-Request-Id` response header and the audit `request_id` (ADR-005 section 6).
 
 ## Errors (ADR-005 section 5)

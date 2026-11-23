@@ -20,6 +20,12 @@
       "valid": true
     },
     {
+      "file": "valid/chat-request-max-tokens-max-safe.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": true
+    },
+    {
       "file": "valid/tool-request-search.json",
       "kind": "schema",
       "schema": "ToolCallRequest",
@@ -98,6 +104,22 @@
       "valid": false,
       "why": "max_tokens must be at least 1",
       "expectError": "max_tokens"
+    },
+    {
+      "file": "invalid/chat-request-max-tokens-above-safe.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "max_tokens above 2^53-1 cannot be audited losslessly",
+      "expectError": "max_tokens"
+    },
+    {
+      "file": "invalid/chat-response-usage-above-safe.json",
+      "kind": "schema",
+      "schema": "ChatCompletionResponse",
+      "valid": false,
+      "why": "usage above 2^53-1",
+      "expectError": "completion_tokens"
     },
     {
       "file": "invalid/chat-request-identity-tenant.json",
