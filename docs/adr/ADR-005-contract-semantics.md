@@ -1,6 +1,6 @@
 # ADR-005: Gateway and budget contract semantics
 
-Status: Accepted (fixed daily UTC window and its documented edge case); all other sections Proposed
+Status: Accepted (fixed daily UTC window and its documented edge case; the audit trail model of section 6.2 to 6.4, approved by the owner); all other sections Proposed
 Requirements: FR-GW-1 to FR-GW-10, FR-AUD-1, FR-AUD-4, NFR-3, FR-CTL-5/6 (spec fields)
 Plan: [P0-T2](../../agents/plans/P0-T2.md); consumed by P0-T3 (OpenAPI, audit schema)
 
@@ -71,36 +71,40 @@ Errors use an OpenAI-style envelope: `{"error": {"code": "<code>", "message": "<
 
 For streaming, a failure after the response started cannot change the HTTP status. The gateway sends a terminal SSE `data:` event containing the same `error` object, then closes the stream (OpenAI-style `data: [DONE]` follows only on normal completion). A mid-stream budget cut-off uses `budget_exhausted`.
 
-### 6. Usage finalization and audit availability (Proposed; owner decision requested in 6.4)
+### 6. Usage finalization and audit availability (audit trail model owner-approved, see 6.4; remaining details Proposed)
 
 **6.1 Usage finalization.**
 - Usage becomes **final** when the reservation reaches a terminal state (`settled`, `settled_at_hard_bound` or `released`, ADR-004), not when the backend starts replying. Non-streaming: after the full backend response. Streaming: when the stream ends by completion, client cancellation, budget cut-off or error. Unknown consumption is charged at the validated hard bound `H` (ADR-004), never refunded.
 - The gateway assigns a unique `request_id` per request. Client retries are new requests and consume budget again; no idempotency key is specified in Phase 0.
 - The request hash is the SHA-256 of the raw request body bytes as received, stored with its size; bodies themselves are not stored by default (FR-AUD-4). Details in ADR-006.
 
-**6.2 Fail-closed audit gate before any work (FR-GW-10).** The audit append of the *final* record cannot, by itself, make the gateway fail closed: if it only happens after the response, an outage is discovered after the backend has done work, and for streams after bytes have reached the client, and those bytes cannot be retracted. So an admitted request has two audit records in its tenant's chain, both carrying the same `request_id`:
-1. an **admission record** (`phase: admitted`: request id, agent, target, `request_hash`/size, `reserved_tokens`, budget `window`), which the gateway must append successfully **before forwarding anything to the backend**. If this append fails, the gateway rejects with `503 audit_unavailable`, forwards nothing, and releases the reservation as *proved no work* (ADR-004). A store that is already down is therefore detected before any work or any bytes;
-2. a **final record** (`phase: final`) appended after terminal settlement, carrying final `tokens_in`, `tokens_out`, `status`, `latency`, the `usage_source` (`backend_reported`, `gateway_counted` or `hard_bound`; the last means consumption was unknown and the hard bound `H` was charged), and an `overshoot` flag.
+**6.2 Audit model: one logical audit trail per request (OWNER-APPROVED, see 6.4).** FR-AUD-1 ("every gateway request shall produce one audit record") is implemented as **one logical audit trail per request**, stored as one or more append-only entries (events) in the tenant's chain that share the request's `request_id`. A request counts once; its trail has these events:
+1. `admitted`: request id, agent, target, `request_hash`/size, `reserved_tokens`, budget `window`. The gateway must append it successfully **before forwarding anything to the backend**. If the append fails, the gateway rejects with `503 audit_unavailable`, forwards nothing, and releases the reservation as *proved no work* (ADR-004). A store that is already down is therefore detected before any work or bytes.
+2. `completed`: appended after terminal settlement, with final `tokens_in`, `tokens_out`, `status` (including `abandoned` or `unfinalized` when written by recovery), `latency`, `usage_source` (`backend_reported`, `gateway_counted` or `hard_bound`; the last means consumption was unknown and the hard bound `H` was charged) and an `overshoot` flag.
+3. `correction` (zero or more): an append-only adjustment tied to `request_id` and `reservation_id`, written when a late usage correction is applied after the reservation reached a terminal state (ADR-004 excess-only rule, including a hard-bound violation). It carries a non-negative `delta_tokens`, a `reason`, and the resulting corrected total. Earlier events are never modified; the trail is truthful because later events add what was learned.
+4. `rejected`: a single-event trail for a request rejected before admission (400, 401, 403, 429, ...). Because the request is already being rejected, a failed append here does not change the outcome; it increments a counter metric. This completeness gap is documented, not hidden.
 
-Requests rejected before admission (400, 401, 403, 429, ...) are not admitted and have a single record (`phase: rejected`). Because the request is already being rejected, a failed append for a rejected request does not change the outcome; it increments a counter metric, and this gap in completeness is documented, not hidden.
+**Totals and counts.** A request's audited usage is the `completed` tokens plus the sum of its `correction` deltas. The number of requests is the number of distinct `request_id` values; the number of physical chain entries is larger. Documentation, metrics and the checkpoint `count` (ADR-006) must say which they mean and must not equate chain length with request count.
+
+**Incomplete trails are detectable.** The verifier and operators can find (a) an `admitted` event with no `completed` event after the lease plus `T_exec_max` plus a margin, and (b) a reservation whose `excess_applied` flag is set but which has no matching `correction` event. When a correction is applied, the obligation to append its event is persisted with the reservation (`correction_pending`) and retried until it succeeds; until then the trail is flagged incomplete.
 
 **6.3 Behavior when the audit store fails.**
 | Case | Behavior | What is guaranteed |
 | --- | --- | --- |
-| Store already down before the request | Admission append fails: `503 audit_unavailable`, nothing forwarded, reservation released | No work done, no bytes delivered, no usage charged |
-| Store goes down after admission, non-streaming response | The gateway holds the (already complete) response until the final append succeeds. If it cannot append within a bounded time (TBD), it discards the response and returns `503 audit_unavailable` | No unaudited response bytes reach the client. Usage is charged at the known actual (ADR-004), so the budget stays honest |
-| Store goes down after admission, **streaming** response | Bytes already sent cannot be retracted. The gateway attempts the final append at stream end (bounded retries, TBD) and, on failure, sends a terminal error event. A recovery step appends the missing `final` record (with the settled usage and a status such as `unfinalized`) when the store returns | A durable admission record exists naming the request, agent, request hash and reserved bound. Usage is charged. No new request is admitted while the store is down (the next admission gate fails). **Not guaranteed:** that a final record exists before bytes are delivered, or that bytes are withheld when the store fails mid-stream |
-| Gateway crashes between admission and final | Recovery settles at the hard bound (ADR-004) and appends a `final` record with status `abandoned` | Request remains auditable from the admission record |
-The verifier (ADR-006) reports an `admitted` record with no `final` record older than the lease and timeout bound as an *unfinalized request anomaly*; it is not a chain break.
-The demo-only fail-open setting (FR-GW-10) skips the admission gate. When enabled, records carry `audit_mode: fail_open`; it must be off by default and visible in configuration.
+| Store already down before the request | `admitted` append fails: `503 audit_unavailable`, nothing forwarded, reservation released | No work done, no bytes delivered, no usage charged |
+| Store goes down after admission, non-streaming response | The gateway holds the (already complete) response until the `completed` append succeeds. If it cannot append within a bounded time (TBD), it discards the response and returns `503 audit_unavailable` | No unaudited response bytes reach the client. Usage is still charged (ADR-004), so the budget stays honest |
+| Store goes down after admission, **streaming** response | Bytes already sent cannot be retracted. The gateway attempts the `completed` append at stream end (bounded retries, TBD) and, on failure, sends a terminal error event. A recovery step appends the missing `completed` event (status `unfinalized`) when the store returns | A durable `admitted` event names the request, agent, request hash and reserved tokens. Usage is charged. No new request is admitted while the store is down (the next admission gate fails). **Not guaranteed:** that a `completed` event exists before bytes are delivered, or that bytes are withheld when the store fails mid-stream |
+| Gateway crashes between admission and completion | Recovery settles at the hard bound `H` (ADR-004) and appends `completed` with status `abandoned` | The request remains auditable from its `admitted` event |
+| Late usage correction while the store is down | The budget counter is corrected first (budget safety does not wait for the audit store); the `correction` event is retried until it is appended | The trail is flagged incomplete until the event exists |
+The verifier (ADR-006) reports the incomplete-trail conditions above as anomalies; they are not chain breaks. The demo-only fail-open setting (FR-GW-10) skips the admission gate. When enabled, events carry `audit_mode: fail_open`; it must be off by default and visible in configuration.
 
-**Consequence for streaming (stated plainly).** Strict fail-closed holds at admission for every request. For streams it does not extend to bytes already delivered when the store fails mid-stream. Closing that gap would require either buffering the whole stream until the final append succeeds (which defeats streaming) or durable periodic progress records (cost and complexity not specified here).
+**Consequence for streaming (stated plainly).** Strict fail-closed holds at admission for every request. For streams it does not extend to bytes already delivered when the store fails mid-stream. Closing that gap would require either buffering the whole stream until the `completed` append succeeds (which defeats streaming) or durable periodic progress events (cost and complexity not specified here).
 
-**6.4 Owner decision requested.** FR-AUD-1 says "every gateway request shall produce one audit record". With INSERT-only database access (FR-AUD-5), a pending record cannot be updated into a final one, so a pre-forward gate needs a second record. Options:
-- **A (this ADR, recommended):** two records per admitted request (admission then final) and one for a rejected request. Gives a strict gate before any work; reads FR-AUD-1 as "one auditable request, recorded in a linked pair".
-- **B:** one final record plus a pre-forward writability probe. Keeps one record per request but an outage between probe and final append yields unaudited work or bytes.
-- **C:** one final record, with all output held until it is durable. Keeps one record and strict audit-before-delivery but cannot stream incrementally.
-Not decided and not owner-accepted. P0-T3's audit schema must not be finalized around A until this is answered; if the answer is B or C, sections 6.2 to 6.3 and ADR-006 change.
+**6.4 Owner decision (recorded).** Question put to the owner: FR-AUD-1 says "one audit record" per request; with INSERT-only audit access (FR-AUD-5) a pending record cannot be updated, so a strict pre-forward gate needs more than one entry. Options were: (A) one logical audit trail per request with admission, completion and correction events; (B) one record plus a pre-forward writability probe; (C) one record with all output held until durable.
+- **Decision: the owner approved option A**, including its streaming failure boundary (fail-closed at admission; bytes delivered before a mid-stream outage cannot be retracted), when asked directly by the executor in this task's session after the Codex r2 review recommended it. Evidence: the owner's reply to that question in the session; no document or date is recorded for it beyond the run report entry. The review recommendation itself is not the approval.
+- **What is not decided:** the exact event schema (fields, encodings), retry and timeout values, and the checkpoint cadence, all specification work for P0-T3 and Phase 2.
+- B and C were not chosen. B has a race between probe and final write; C removes incremental streaming.
+- The requirements document still says "one audit record" in FR-AUD-1. The executor did not edit the owner's requirements document. The owner may amend its wording to match this decision; until then this ADR is the record of the approved interpretation.
 
 ## Consequences
 - The midnight edge case lets a caller burst to 2 times the daily cap around the reset. A rolling window would remove it but was not chosen; this must be disclosed, not hidden.
@@ -116,7 +120,7 @@ Not decided and not owner-accepted. P0-T3's audit schema must not be finalized a
 | FR-GW-5 | Per-agent bucket with burst = RPM, per-replica caveat | Phase 2 task 4 |
 | FR-GW-7/8 | Reservations bound to admission window; stream error semantics | Phase 2 tasks 3, 6 |
 | FR-GW-10 | Admission audit gate before forwarding; usage still settled when a later append fails; mid-stream gap stated (section 6) | Phase 2 task 7 |
-| FR-AUD-1/4 | Admission and final record for each admitted request, one for each rejected request (owner decision requested, 6.4); body hash and size only | Phase 2 task 7 |
+| FR-AUD-1/4 | One logical audit trail per request (admitted, completed, corrections; rejected for unadmitted requests), owner-approved interpretation of FR-AUD-1 (6.4); body hash and size only | Phase 2 task 7 |
 | NFR-3 | Conditional overshoot bound via reservations and an in-flight limit (ADR-004); not claimed as met yet | Phase 2 |
 
 ## Validation
@@ -127,8 +131,8 @@ P0-T3 turns this into OpenAPI plus positive and negative fixtures and checks the
 2. Whether the gateway enforces the Tenant's `requestsPerMinute` as an aggregate bucket in addition to per-agent buckets.
 3. Burst capacity: `requestsPerMinute` (chosen here) versus a smaller configurable burst.
 4. TokenReview audience name, result-cache TTL, platform default and maximum `max_tokens` (TBD in P0-T3).
-5. **Audit record model (owner decision requested, 6.4):** two linked records per admitted request (recommended) versus one record per request with a weaker or non-streaming guarantee. Blocks the P0-T3 audit schema.
+5. ~~Audit record model~~ **Resolved by the owner (6.4):** one logical audit trail per request. The P0-T3 audit schema may be built on it; event field details remain P0-T3 specification work.
 
 ## Owner acceptance
 - Evidence: P0-T2 plan, "Accepted owner decisions": "Fixed daily UTC budget window, resetting at 00:00 UTC", with the reset-boundary edge case and the requirement to specify how reservations and streams spanning midnight retain their accounting window. Section 1 implements exactly that.
-- Accepted by owner: yes for section 1. Sections 2 to 6 are specification detail the plan assigns to the executor to document ("do not label unspecified choices as owner-accepted"); they are Proposed.
+- Accepted by owner: yes for section 1. Also yes for the audit trail model in sections 6.2 to 6.4: the owner approved one logical audit trail per request (admission, completion and correction events) and its streaming failure boundary; evidence is the owner's reply in the executor's session recorded in 6.4 and in `agents/runs/P0-T2.md`, not a plan document. All other content (sections 2 to 5, and the rest of 6: gate wording, timeouts, event fields) is specification detail the plan assigns to the executor to document ("do not label unspecified choices as owner-accepted"); it is Proposed.
