@@ -73,6 +73,9 @@ Nothing follows `[DONE]` or an error event. When the delivered output reaches th
 ## Trace context (FR-GW-9)
 Both operations accept `traceparent` (and pass `tracestate` through). The pattern in the OpenAPI file checks the W3C format in lowercase hex. The W3C rule that all-zero trace and parent ids are invalid cannot be written as a pattern and is left to implementations.
 
+## Fixtures and how they are checked
+`examples/` holds valid and invalid request, response, header and SSE stream fixtures, listed in `examples/manifest.json` with the reason each invalid one is invalid and a substring of the expected rejection. `make contracts-check` loads `openapi.yaml` with kin-openapi, requires it to be a valid OpenAPI document, and validates every fixture against the declared schemas: each valid fixture must pass, each invalid one must be rejected for the stated reason, response fixtures are checked against the schema the operation declares for that status, and the SSE parser enforces the stream rules above (terminal usage chunk then `[DONE]`, or one error event with no `[DONE]`, nothing afterwards). Tests also check that no request schema declares identity fields, that every status and every error code has a valid fixture, and that no fixture file is unlisted. These checks show the document and fixtures are consistent; they say nothing about a running gateway.
+
 ## Decision status of this contract
 | Item | Status |
 | --- | --- |
