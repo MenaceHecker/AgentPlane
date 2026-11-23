@@ -1,0 +1,8 @@
+{
+  "id": "req_0001",
+  "object": "tool.result",
+  "tool": "calculator",
+  "result": {
+    "value": 42
+  }
+}

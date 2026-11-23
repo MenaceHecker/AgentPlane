@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "audit_unavailable",
+    "message": "audit store unavailable; nothing was forwarded",
+    "request_id": "req_0001"
+  }
+}

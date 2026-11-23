@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "upstream_error",
+    "message": "backend failed",
+    "request_id": "req_0001"
+  }
+}

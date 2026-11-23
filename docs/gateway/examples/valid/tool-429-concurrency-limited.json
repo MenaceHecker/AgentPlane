@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "concurrency_limited",
+    "message": "agent has the maximum number of requests in flight",
+    "request_id": "req_0001"
+  }
+}

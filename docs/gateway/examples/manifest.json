@@ -1,0 +1,581 @@
+{
+  "description": "Gateway contract fixtures. Validated by internal/contractcheck (make contracts-check). Each invalid entry must be rejected; expectError is a substring of the validator message (empty means any rejection).",
+  "fixtures": [
+    {
+      "file": "valid/chat-request-minimal.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": true
+    },
+    {
+      "file": "valid/chat-request-full.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": true
+    },
+    {
+      "file": "valid/chat-request-stream.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": true
+    },
+    {
+      "file": "valid/tool-request-search.json",
+      "kind": "schema",
+      "schema": "ToolCallRequest",
+      "valid": true
+    },
+    {
+      "file": "valid/tool-request-empty-arguments.json",
+      "kind": "schema",
+      "schema": "ToolCallRequest",
+      "valid": true
+    },
+    {
+      "file": "valid/chat-response-basic.json",
+      "kind": "schema",
+      "schema": "ChatCompletionResponse",
+      "valid": true
+    },
+    {
+      "file": "valid/chat-chunk-content.json",
+      "kind": "schema",
+      "schema": "ChatCompletionChunk",
+      "valid": true
+    },
+    {
+      "file": "valid/chat-chunk-final-content.json",
+      "kind": "schema",
+      "schema": "ChatCompletionChunk",
+      "valid": true
+    },
+    {
+      "file": "valid/chat-chunk-usage.json",
+      "kind": "schema",
+      "schema": "ChatCompletionChunk",
+      "valid": true
+    },
+    {
+      "file": "valid/tool-response-basic.json",
+      "kind": "schema",
+      "schema": "ToolCallResponse",
+      "valid": true
+    },
+    {
+      "file": "valid/stream-error-budget.json",
+      "kind": "schema",
+      "schema": "ErrorResponse",
+      "valid": true
+    },
+    {
+      "file": "invalid/chat-request-missing-model.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "model is required",
+      "expectError": "model"
+    },
+    {
+      "file": "invalid/chat-request-empty-messages.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "at least one message",
+      "expectError": "messages"
+    },
+    {
+      "file": "invalid/chat-request-max-tokens-zero.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "max_tokens must be at least 1",
+      "expectError": "max_tokens"
+    },
+    {
+      "file": "invalid/chat-request-max-tokens-negative.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "max_tokens must be at least 1",
+      "expectError": "max_tokens"
+    },
+    {
+      "file": "invalid/chat-request-identity-tenant.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "body must not carry identity (tenant)",
+      "expectError": "tenant"
+    },
+    {
+      "file": "invalid/chat-request-identity-agent.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "body must not carry identity (agent)",
+      "expectError": "agent"
+    },
+    {
+      "file": "invalid/chat-request-unsupported-user.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "OpenAI user field is not in the supported subset",
+      "expectError": "user"
+    },
+    {
+      "file": "invalid/chat-request-unsupported-tools.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "tools are not in the supported subset",
+      "expectError": "tools"
+    },
+    {
+      "file": "invalid/chat-request-unknown-role.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "role must be system, user or assistant",
+      "expectError": "role"
+    },
+    {
+      "file": "invalid/chat-request-temperature-high.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "temperature above 2",
+      "expectError": "temperature"
+    },
+    {
+      "file": "invalid/chat-request-stream-not-bool.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "stream must be boolean",
+      "expectError": "stream"
+    },
+    {
+      "file": "invalid/chat-request-content-not-string.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "content must be a string",
+      "expectError": "content"
+    },
+    {
+      "file": "invalid/tool-request-missing-arguments.json",
+      "kind": "schema",
+      "schema": "ToolCallRequest",
+      "valid": false,
+      "why": "arguments is required",
+      "expectError": "arguments"
+    },
+    {
+      "file": "invalid/tool-request-identity-tenant.json",
+      "kind": "schema",
+      "schema": "ToolCallRequest",
+      "valid": false,
+      "why": "body must not carry identity (tenant)",
+      "expectError": "tenant"
+    },
+    {
+      "file": "invalid/tool-request-arguments-not-object.json",
+      "kind": "schema",
+      "schema": "ToolCallRequest",
+      "valid": false,
+      "why": "arguments must be an object",
+      "expectError": "arguments"
+    },
+    {
+      "file": "invalid/chat-response-missing-usage.json",
+      "kind": "schema",
+      "schema": "ChatCompletionResponse",
+      "valid": false,
+      "why": "usage is required",
+      "expectError": "usage"
+    },
+    {
+      "file": "invalid/chat-response-wrong-object.json",
+      "kind": "schema",
+      "schema": "ChatCompletionResponse",
+      "valid": false,
+      "why": "object must be chat.completion",
+      "expectError": "object"
+    },
+    {
+      "file": "invalid/chat-chunk-bad-finish.json",
+      "kind": "schema",
+      "schema": "ChatCompletionChunk",
+      "valid": false,
+      "why": "finish_reason must be stop, length or null",
+      "expectError": "finish_reason"
+    },
+    {
+      "file": "invalid/stream-error-budget-missing-scope.json",
+      "kind": "schema",
+      "schema": "ErrorResponse",
+      "valid": false,
+      "why": "budget_exhausted needs scope and reset_at",
+      "expectError": "scope"
+    },
+    {
+      "file": "valid/chat-400-invalid-request.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 400,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-401-unauthenticated.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 401,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-403-forbidden.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 403,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-429-budget-agent.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-429-budget-tenant.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-429-rate-limited.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-429-concurrency-limited.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-500-internal.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 500,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-502-upstream.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 502,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-503-audit-unavailable.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 503,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-503-identity-unavailable.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 503,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-504-upstream-timeout.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 504,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-400-invalid-request.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 400,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-401-unauthenticated.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 401,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-403-forbidden.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 403,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-429-budget-agent.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-429-budget-tenant.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-429-rate-limited.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-429-concurrency-limited.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 429,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-500-internal.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 500,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-502-upstream.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 502,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-503-audit-unavailable.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 503,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-503-identity-unavailable.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 503,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-504-upstream-timeout.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 504,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-403-tool-not-allowed.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 403,
+      "valid": true
+    },
+    {
+      "file": "valid/chat-200-response.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 200,
+      "valid": true
+    },
+    {
+      "file": "valid/tool-200-response.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 200,
+      "valid": true
+    },
+    {
+      "file": "invalid/chat-429-budget-missing-reset.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": false,
+      "why": "budget_exhausted needs reset_at",
+      "expectError": "reset_at"
+    },
+    {
+      "file": "invalid/chat-429-wrong-code.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": false,
+      "why": "429 must carry a 429 code",
+      "expectError": ""
+    },
+    {
+      "file": "invalid/chat-401-budget-code.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 401,
+      "valid": false,
+      "why": "401 must carry unauthenticated",
+      "expectError": ""
+    },
+    {
+      "file": "invalid/chat-403-rate-code.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 403,
+      "valid": false,
+      "why": "403 must carry forbidden or tool_not_allowed",
+      "expectError": ""
+    },
+    {
+      "file": "invalid/tool-503-budget-code.json",
+      "kind": "response",
+      "operation": "POST /v1/tools/{name}",
+      "status": 503,
+      "valid": false,
+      "why": "503 must carry audit_unavailable or identity_unavailable",
+      "expectError": ""
+    },
+    {
+      "file": "invalid/chat-400-missing-request-id.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 400,
+      "valid": false,
+      "why": "request_id is required",
+      "expectError": "request_id"
+    },
+    {
+      "file": "invalid/chat-400-unknown-code.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 400,
+      "valid": false,
+      "why": "unknown error code",
+      "expectError": ""
+    },
+    {
+      "file": "invalid/chat-400-extra-field.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 400,
+      "valid": false,
+      "why": "error objects carry no extra fields (no secret echo)",
+      "expectError": ""
+    },
+    {
+      "file": "valid/traceparent-basic.json",
+      "kind": "traceparent",
+      "valid": true
+    },
+    {
+      "file": "invalid/traceparent-uppercase.json",
+      "kind": "traceparent",
+      "valid": false,
+      "why": "must be lowercase hex",
+      "expectError": ""
+    },
+    {
+      "file": "invalid/traceparent-short-trace.json",
+      "kind": "traceparent",
+      "valid": false,
+      "why": "trace id must be 32 hex",
+      "expectError": ""
+    },
+    {
+      "file": "invalid/traceparent-missing-flags.json",
+      "kind": "traceparent",
+      "valid": false,
+      "why": "flags are required",
+      "expectError": ""
+    },
+    {
+      "file": "streams/valid-complete.sse",
+      "kind": "stream",
+      "valid": true
+    },
+    {
+      "file": "streams/valid-budget-cutoff.sse",
+      "kind": "stream",
+      "valid": true
+    },
+    {
+      "file": "streams/valid-upstream-failure.sse",
+      "kind": "stream",
+      "valid": true
+    },
+    {
+      "file": "streams/invalid-missing-done.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "normal completion must end with [DONE]",
+      "expectError": "[DONE]"
+    },
+    {
+      "file": "streams/invalid-done-after-error.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "no [DONE] after an error event",
+      "expectError": "after"
+    },
+    {
+      "file": "streams/invalid-missing-usage.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "normal completion needs the terminal usage chunk",
+      "expectError": "usage"
+    },
+    {
+      "file": "streams/invalid-usage-with-choices.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "terminal usage chunk must have empty choices",
+      "expectError": "choices"
+    },
+    {
+      "file": "streams/invalid-data-after-done.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "no events after [DONE]",
+      "expectError": "after"
+    },
+    {
+      "file": "streams/invalid-error-then-chunk.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "error event must be terminal",
+      "expectError": "after"
+    },
+    {
+      "file": "streams/invalid-bad-event.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "event matches neither a chunk nor an error",
+      "expectError": ""
+    },
+    {
+      "file": "streams/invalid-usage-twice.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "exactly one terminal usage chunk",
+      "expectError": "usage"
+    }
+  ]
+}

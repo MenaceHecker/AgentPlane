@@ -1,0 +1,10 @@
+{
+  "model": "m",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Summarize this document."
+    }
+  ],
+  "max_tokens": -5
+}

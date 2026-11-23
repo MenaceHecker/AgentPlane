@@ -1,0 +1,662 @@
+openapi: 3.0.3
+info:
+  title: AgentPlane Gateway API
+  version: 0.1.0-draft
+  description: |
+    Contract for the AgentPlane gateway: an OpenAI-style chat completion
+    endpoint and a tool-call endpoint (FR-GW-1).
+
+    **Status: Phase 0 contract only.** No gateway exists yet. Nothing in this
+    file is implemented, enforced or measured. Runtime enforcement of
+    authentication, budgets, rate limits, tool allowlists and audit is Phase 2
+    work. Semantics come from ADR-004, ADR-005 and ADR-006 in `docs/adr/`;
+    where a value is not decided there it is marked as a specification choice
+    in `docs/gateway/README.md`, not as an owner decision.
+
+    **Identity is derived from the bearer token only** (FR-GW-2/3). Request
+    bodies and headers never establish or override tenant or agent identity;
+    bodies containing identity-like fields are rejected (`additionalProperties:
+    false`, error `invalid_request`).
+
+    **Explicit OpenAI-compatible subset.** Only the request and response fields
+    declared here are supported. Any other OpenAI field (for example `tools`,
+    `functions`, `n`, `logprobs`, `response_format`, `seed`, `user`) is not
+    supported and is rejected as `invalid_request`.
+servers:
+  - url: http://gateway.agentplane-system.svc:8080
+    description: Example in-cluster address. The real address and namespace are deployment choices, not part of this contract.
+security:
+  - bearerAuth: []
+tags:
+  - name: chat
+  - name: tools
+paths:
+  /v1/chat/completions:
+    post:
+      tags: [chat]
+      operationId: createChatCompletion
+      summary: Create a chat completion (optionally streamed)
+      description: |
+        Order of checks (ADR-004/005): authenticate the token, map identity to
+        (tenant, agent), validate the request, apply the per-agent rate limit,
+        atomically admit against the agent and tenant token budgets and the
+        in-flight limit (reservation), append the `admitted` audit event, and
+        only then forward to the model backend. If the audit append fails
+        nothing is forwarded (`503 audit_unavailable`).
+
+        With `stream: true` the response is `text/event-stream` (see
+        "Streaming" in `docs/gateway/README.md`). A budget cut-off or failure
+        after streaming has started cannot change the HTTP status; it is
+        reported as a terminal `error` event with no `[DONE]`.
+      parameters:
+        - $ref: '#/components/parameters/Traceparent'
+        - $ref: '#/components/parameters/Tracestate'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: Completion (JSON), or an SSE stream when `stream` is true.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Server-sent events. Each event is `data: <json>` followed by a
+                  blank line. Normal completion: zero or more
+                  `ChatCompletionChunk` events, one terminal usage chunk
+                  (`choices: []`, `usage` set), then `data: [DONE]`. Failure after
+                  the stream started: one `ErrorResponse` event and the stream
+                  closes, with no `[DONE]`.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+        '504':
+          $ref: '#/components/responses/UpstreamTimeout'
+  /v1/tools/{name}:
+    post:
+      tags: [tools]
+      operationId: callTool
+      summary: Call a named tool through the gateway
+      description: |
+        A tool call is authenticated, rate-limited per agent, checked against the
+        tool allowlist (permitted only if the tool is in both the Tenant's
+        `egress.allowedTools` and the Agent's `tools`, FR-GW-6), audited with the
+        same admission gate, then forwarded. A tool call consumes the agent's
+        request rate limit but no token budget (specification choice).
+        A tool name the platform does not know is `400 invalid_request`; a known
+        tool that is not allowed for this agent is `403 tool_not_allowed`.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Tool name, for example `web-search` or `calculator`.
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9-]{0,62}$'
+        - $ref: '#/components/parameters/Traceparent'
+        - $ref: '#/components/parameters/Tracestate'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolCallRequest'
+      responses:
+        '200':
+          description: Tool result.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolCallResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+        '504':
+          $ref: '#/components/responses/UpstreamTimeout'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        A projected Kubernetes ServiceAccount token, validated by the gateway
+        through the TokenReview API for the gateway audience (name is a
+        specification choice: `agentplane-gateway`). No static API keys
+        (FR-GW-2). The token alone determines (tenant, agent).
+  parameters:
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: |
+        W3C Trace Context `traceparent` (FR-GW-9): `version-traceid-parentid-flags`
+        in lowercase hex. The gateway continues the trace. All-zero trace or
+        parent ids are invalid per the W3C specification; that rule cannot be
+        expressed as a pattern here and is checked by implementations.
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+        example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+    Tracestate:
+      name: tracestate
+      in: header
+      required: false
+      description: W3C Trace Context `tracestate`, passed through unchanged.
+      schema:
+        type: string
+        maxLength: 512
+  headers:
+    RequestId:
+      description: Gateway-assigned request id. Equals the audit `request_id` and the completion `id`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    InvalidRequest:
+      description: |
+        Malformed body, unsupported field, identity-like field, bad `max_tokens`,
+        unknown tool, or a model that is not enabled.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InvalidRequestError'
+    Unauthenticated:
+      description: Missing, malformed, expired or rejected token.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnauthenticatedError'
+    Forbidden:
+      description: |
+        Authenticated but not mapped to an active Tenant and Agent (`forbidden`),
+        or the tool is not allowed for this agent (`tool_not_allowed`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ForbiddenError'
+    TooManyRequests:
+      description: |
+        Three distinct causes, distinguished by `error.code`:
+        `budget_exhausted` (daily token budget of the agent or tenant scope,
+        FR-GW-4; resets at the next 00:00 UTC), `rate_limited` (per-agent token
+        bucket empty, FR-GW-5) and `concurrency_limited` (agent already has its
+        maximum in-flight requests, ADR-004). The last two include `Retry-After`.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/BudgetExhaustedError'
+              - $ref: '#/components/schemas/RateLimitedError'
+              - $ref: '#/components/schemas/ConcurrencyLimitedError'
+    InternalError:
+      description: Unexpected gateway error.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalErrorResponse'
+    UpstreamError:
+      description: The model or tool backend failed.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpstreamErrorResponse'
+    Unavailable:
+      description: |
+        `audit_unavailable`: the admission audit append failed before forwarding
+        (nothing was forwarded or charged), or the completion append failed for a
+        non-streaming response that was then withheld (FR-GW-10).
+        `identity_unavailable`: TokenReview could not be reached.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnavailableError'
+    UpstreamTimeout:
+      description: The backend did not answer in time.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpstreamTimeoutResponse'
+  schemas:
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+    ChatCompletionRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        Supported OpenAI-compatible subset. No identity fields exist: tenant and
+        agent come from the token (ADR-005).
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Model name. A model that is not enabled for budgeted traffic is `400 invalid_request` (ADR-004).
+        messages:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        max_tokens:
+          type: integer
+          format: int64
+          minimum: 1
+          description: |
+            Output token cap. Must be at least 1 (`0` and negatives are
+            `invalid_request`). If absent a platform default applies; if above the
+            platform maximum it is clamped. Default and maximum are deployment
+            configuration, not fixed by this contract (ADR-005).
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+        top_p:
+          type: number
+          minimum: 0
+          maximum: 1
+        stop:
+          type: array
+          maxItems: 4
+          items:
+            type: string
+            minLength: 1
+        stream:
+          type: boolean
+          default: false
+    Usage:
+      type: object
+      additionalProperties: false
+      required: [prompt_tokens, completion_tokens, total_tokens]
+      properties:
+        prompt_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        completion_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        total_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+    ChatCompletionResponse:
+      type: object
+      additionalProperties: false
+      required: [id, object, created, model, choices, usage]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: The gateway `request_id`.
+        object:
+          type: string
+          enum: [chat.completion]
+        created:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Unix time in seconds.
+        model:
+          type: string
+        choices:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [index, message, finish_reason]
+            properties:
+              index:
+                type: integer
+                minimum: 0
+              message:
+                type: object
+                additionalProperties: false
+                required: [role, content]
+                properties:
+                  role:
+                    type: string
+                    enum: [assistant]
+                  content:
+                    type: string
+              finish_reason:
+                type: string
+                enum: [stop, length]
+        usage:
+          $ref: '#/components/schemas/Usage'
+    ChatCompletionChunk:
+      type: object
+      additionalProperties: false
+      description: |
+        One SSE `data:` event. Content chunks have a non-empty `choices` and no
+        `usage`. The terminal usage chunk has `choices: []` and `usage` set, and
+        is sent exactly once before `data: [DONE]` on normal completion.
+      required: [id, object, created, model, choices]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        object:
+          type: string
+          enum: [chat.completion.chunk]
+        created:
+          type: integer
+          format: int64
+          minimum: 0
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [index, delta]
+            properties:
+              index:
+                type: integer
+                minimum: 0
+              delta:
+                type: object
+                additionalProperties: false
+                properties:
+                  role:
+                    type: string
+                    enum: [assistant]
+                  content:
+                    type: string
+              finish_reason:
+                type: string
+                nullable: true
+                enum: [stop, length, null]
+        usage:
+          $ref: '#/components/schemas/Usage'
+    ToolCallRequest:
+      type: object
+      additionalProperties: false
+      description: No identity fields exist; tenant and agent come from the token.
+      required: [arguments]
+      properties:
+        arguments:
+          type: object
+          additionalProperties: true
+          description: Tool-specific arguments.
+    ToolCallResponse:
+      type: object
+      additionalProperties: false
+      required: [id, object, tool, result]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: The gateway `request_id`.
+        object:
+          type: string
+          enum: [tool.result]
+        tool:
+          type: string
+        result:
+          nullable: true
+          description: Tool-specific JSON result.
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      description: |
+        Base error fields. Messages never contain tokens, prompt text or other
+        tenants' data (ADR-005).
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+          enum:
+            - invalid_request
+            - unauthenticated
+            - forbidden
+            - tool_not_allowed
+            - budget_exhausted
+            - rate_limited
+            - concurrency_limited
+            - upstream_error
+            - upstream_timeout
+            - audit_unavailable
+            - identity_unavailable
+            - internal_error
+        message:
+          type: string
+          minLength: 1
+        request_id:
+          type: string
+          minLength: 1
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      description: Generic error envelope (any code). Used for stream `error` events.
+      required: [error]
+      properties:
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorDetail'
+            - $ref: '#/components/schemas/BudgetExhaustedDetail'
+    BudgetExhaustedDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id, scope, reset_at]
+      properties:
+        code:
+          type: string
+          enum: [budget_exhausted]
+        message:
+          type: string
+          minLength: 1
+        request_id:
+          type: string
+          minLength: 1
+        scope:
+          type: string
+          enum: [agent, tenant]
+          description: Which budget scope failed.
+        reset_at:
+          type: string
+          format: date-time
+          description: |
+            Next 00:00:00 UTC, when a new fixed daily window starts. A fixed daily
+            cap is not a rolling 24-hour cap (ADR-005 section 1).
+    InvalidRequestError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [invalid_request]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    UnauthenticatedError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [unauthenticated]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    ForbiddenError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [forbidden, tool_not_allowed]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    BudgetExhaustedError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/BudgetExhaustedDetail'
+    RateLimitedError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [rate_limited]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    ConcurrencyLimitedError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [concurrency_limited]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    InternalErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [internal_error]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    UpstreamErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [upstream_error]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    UpstreamTimeoutResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [upstream_timeout]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}
+    UnavailableError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code: {type: string, enum: [audit_unavailable, identity_unavailable]}
+            message: {type: string, minLength: 1}
+            request_id: {type: string, minLength: 1}

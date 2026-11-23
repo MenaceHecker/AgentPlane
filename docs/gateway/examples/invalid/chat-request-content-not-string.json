@@ -1,0 +1,9 @@
+{
+  "model": "m",
+  "messages": [
+    {
+      "role": "user",
+      "content": 5
+    }
+  ]
+}
