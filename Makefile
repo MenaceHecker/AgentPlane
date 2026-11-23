@@ -29,7 +29,9 @@ check-kind-prereqs:
 
 .PHONY: kind-up
 kind-up: check-kind-prereqs ## Create the local kind cluster (no-op if it exists)
-	@if kind get clusters 2>/dev/null | grep -qx '$(KIND_CLUSTER_NAME)'; then \
+	@set -e; \
+	clusters="$$(kind get clusters 2>&1)" || { echo "ERROR: 'kind get clusters' failed; not creating anything: $$clusters" >&2; exit 1; }; \
+	if printf '%s\n' "$$clusters" | grep -qx '$(KIND_CLUSTER_NAME)'; then \
 	  echo "kind cluster '$(KIND_CLUSTER_NAME)' already exists; nothing to do."; \
 	else \
 	  kind create cluster --name '$(KIND_CLUSTER_NAME)'; \
@@ -37,7 +39,9 @@ kind-up: check-kind-prereqs ## Create the local kind cluster (no-op if it exists
 
 .PHONY: kind-down
 kind-down: check-kind-prereqs ## Delete the named local kind cluster (destroys its workloads)
-	@if kind get clusters 2>/dev/null | grep -qx '$(KIND_CLUSTER_NAME)'; then \
+	@set -e; \
+	clusters="$$(kind get clusters 2>&1)" || { echo "ERROR: 'kind get clusters' failed; cannot establish whether '$(KIND_CLUSTER_NAME)' exists: $$clusters" >&2; exit 1; }; \
+	if printf '%s\n' "$$clusters" | grep -qx '$(KIND_CLUSTER_NAME)'; then \
 	  kind delete cluster --name '$(KIND_CLUSTER_NAME)'; \
 	else \
 	  echo "kind cluster '$(KIND_CLUSTER_NAME)' does not exist; nothing to do."; \
