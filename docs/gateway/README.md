@@ -28,6 +28,8 @@ The chat endpoint accepts only this subset; any other field is rejected.
 | `stream` | yes | Boolean, default false |
 | `tools`, `functions`, `tool_choice`, `n`, `logprobs`, `response_format`, `seed`, `user`, penalties, `stream_options` | **no** | Rejected as `invalid_request`. The terminal usage chunk is always sent when streaming, so `stream_options` is unnecessary |
 
+Token counts (`max_tokens` and every `usage` field) are limited to the safe-integer range `0..9007199254740991` (2^53-1), the same domain as the audit contract: larger integers cannot be canonicalized losslessly (`docs/audit/hash-chain.md`). A request above it is `400 invalid_request`.
+
 Responses use OpenAI field names (`usage.prompt_tokens`, `completion_tokens`, `total_tokens`). The completion `id` equals the gateway-assigned `request_id`, which is also the `X-Request-Id` response header and the audit `request_id` (ADR-005 section 6).
 
 ## Errors (ADR-005 section 5)
@@ -45,7 +47,7 @@ Errors use `{"error": {"code", "message", "request_id"}}`. Each status has its o
 | 503 | `audit_unavailable` | Audit append failed (see audit below) | |
 | 503 | `identity_unavailable` | TokenReview unreachable | |
 
-Messages never contain tokens, prompt text or another tenant's data. Error objects carry no extra fields.
+Messages never contain tokens, prompt text or another tenant's data. Error objects carry no extra fields. `budget_exhausted` is valid only with both `scope` (`agent` or `tenant`) and `reset_at`; the generic error detail cannot carry that code, so a budget error missing either field (or both) is rejected, including as a stream `error` event.
 
 ## Budget window and accounting (ADR-004, ADR-005)
 - **Fixed daily UTC window (owner-accepted).** A window is the UTC calendar day `[00:00:00Z, 24:00:00Z)`, identified by the UTC date of the request's admission time. It resets at 00:00 UTC. It is not a rolling 24-hour window.

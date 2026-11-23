@@ -1,0 +1,65 @@
+{
+  "description": "Safe-integer domain vectors. Accepted values are canonicalized and hashed by the Python reference; the Go tests recompute them. Rejected number texts must be refused before canonicalization by both implementations.",
+  "max_safe_integer": 9007199254740991,
+  "accepted": [
+    {
+      "reserved_tokens": 0,
+      "canonical": "{\"agent\":\"summarizer\",\"chain_id\":\"acme\",\"event\":\"admitted\",\"event_key\":\"req_b001:admitted\",\"index\":0,\"kind\":\"model\",\"prev_hash\":\"6e1d8faf6390a3f1d850e914712d7d6adf8a9373e2e390277112596c80576a60\",\"request_hash\":\"5079a8a874284530bae1ae120b97bcb970e93fd087557315bae30c43b48f0448\",\"request_id\":\"req_b001\",\"request_size\":1,\"reserved_tokens\":0,\"target\":\"mock-large\",\"tenant\":\"acme\",\"timestamp\":\"2026-11-22T09:00:01.007Z\",\"version\":1,\"window\":\"2026-11-22\"}",
+      "record_hash": "61b7aff515463c7a718e2240fb094a7f9d3742d9bd5e574c4aec0262ae663a7b"
+    },
+    {
+      "reserved_tokens": 1,
+      "canonical": "{\"agent\":\"summarizer\",\"chain_id\":\"acme\",\"event\":\"admitted\",\"event_key\":\"req_b001:admitted\",\"index\":0,\"kind\":\"model\",\"prev_hash\":\"6e1d8faf6390a3f1d850e914712d7d6adf8a9373e2e390277112596c80576a60\",\"request_hash\":\"5079a8a874284530bae1ae120b97bcb970e93fd087557315bae30c43b48f0448\",\"request_id\":\"req_b001\",\"request_size\":1,\"reserved_tokens\":1,\"target\":\"mock-large\",\"tenant\":\"acme\",\"timestamp\":\"2026-11-22T09:00:01.007Z\",\"version\":1,\"window\":\"2026-11-22\"}",
+      "record_hash": "66b51b0c1f9fc6876ec4b0b7bb887696ff00953e5a736ab1123a82061f72e92b"
+    },
+    {
+      "reserved_tokens": 9007199254740990,
+      "canonical": "{\"agent\":\"summarizer\",\"chain_id\":\"acme\",\"event\":\"admitted\",\"event_key\":\"req_b001:admitted\",\"index\":0,\"kind\":\"model\",\"prev_hash\":\"6e1d8faf6390a3f1d850e914712d7d6adf8a9373e2e390277112596c80576a60\",\"request_hash\":\"5079a8a874284530bae1ae120b97bcb970e93fd087557315bae30c43b48f0448\",\"request_id\":\"req_b001\",\"request_size\":1,\"reserved_tokens\":9007199254740990,\"target\":\"mock-large\",\"tenant\":\"acme\",\"timestamp\":\"2026-11-22T09:00:01.007Z\",\"version\":1,\"window\":\"2026-11-22\"}",
+      "record_hash": "8aeb57fb7363dd85be048b1da65bfab9a29c7a7a1c5fd0bfa96c8cbe36bdb49a"
+    },
+    {
+      "reserved_tokens": 9007199254740991,
+      "canonical": "{\"agent\":\"summarizer\",\"chain_id\":\"acme\",\"event\":\"admitted\",\"event_key\":\"req_b001:admitted\",\"index\":0,\"kind\":\"model\",\"prev_hash\":\"6e1d8faf6390a3f1d850e914712d7d6adf8a9373e2e390277112596c80576a60\",\"request_hash\":\"5079a8a874284530bae1ae120b97bcb970e93fd087557315bae30c43b48f0448\",\"request_id\":\"req_b001\",\"request_size\":1,\"reserved_tokens\":9007199254740991,\"target\":\"mock-large\",\"tenant\":\"acme\",\"timestamp\":\"2026-11-22T09:00:01.007Z\",\"version\":1,\"window\":\"2026-11-22\"}",
+      "record_hash": "594b1d91c1e80b129751d6856f67b6e45ca9a5e91b18ee4ab0ea1b44ef87ac33"
+    }
+  ],
+  "rejected_number_texts": [
+    {
+      "text": "9007199254740992",
+      "reason": "2^53: first integer binary64 cannot distinguish from its neighbour"
+    },
+    {
+      "text": "9007199254740993",
+      "reason": "2^53+1: a binary64 serializer prints 9007199254740992"
+    },
+    {
+      "text": "18446744073709551616",
+      "reason": "2^64"
+    },
+    {
+      "text": "-1",
+      "reason": "negative"
+    },
+    {
+      "text": "-0",
+      "reason": "negative zero text"
+    },
+    {
+      "text": "1.0",
+      "reason": "fractional notation"
+    },
+    {
+      "text": "1e3",
+      "reason": "exponent notation"
+    },
+    {
+      "text": "01",
+      "reason": "leading zero"
+    }
+  ],
+  "collapse_hazard": {
+    "a": "9007199254740992",
+    "b": "9007199254740993",
+    "note": "A binary64 (RFC 8785) serializer prints both as 9007199254740992; Python integers keep them distinct. Hence the domain limit."
+  }
+}

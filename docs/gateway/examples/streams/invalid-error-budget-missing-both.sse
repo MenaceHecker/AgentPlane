@@ -1,0 +1,4 @@
+data: {"id":"req_0001","object":"chat.completion.chunk","created":1700000000,"model":"mock-large","choices":[{"index":0,"delta":{"role":"assistant","content":"A"},"finish_reason":null}]}
+
+data: {"error":{"code":"budget_exhausted","message":"daily token budget reached","request_id":"req_0001"}}
+

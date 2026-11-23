@@ -216,6 +216,8 @@ func TestGatewayFixtures(t *testing.T) {
 				err = visit(param.Value.Schema.Value, val)
 			case "stream":
 				err = checkStream(t, doc, string(readFile(t, path)))
+			case "budget-error":
+				err = checkBudgetError(t, doc, readJSON(t, path), f.Valid)
 			default:
 				t.Fatalf("unknown fixture kind %q", f.Kind)
 			}
@@ -263,8 +265,13 @@ func TestGatewayFixturesCoverStatusesAndCodes(t *testing.T) {
 			}
 		}
 	}
+	// Every code the document can emit: the generic detail's codes plus the
+	// budget detail's single code.
 	var want []string
 	for _, c := range schemaByName(t, doc, "ErrorDetail").Properties["code"].Value.Enum {
+		want = append(want, c.(string))
+	}
+	for _, c := range schemaByName(t, doc, "BudgetExhaustedDetail").Properties["code"].Value.Enum {
 		want = append(want, c.(string))
 	}
 	for _, c := range want {
@@ -275,6 +282,45 @@ func TestGatewayFixturesCoverStatusesAndCodes(t *testing.T) {
 	if len(codes) != len(want) {
 		t.Errorf("fixtures use %d codes, enum has %d", len(codes), len(want))
 	}
+}
+
+// checkBudgetError applies the budget-error contract to a {"error": {...}}
+// object (review finding: budget_exhausted must never match the generic
+// branch). It requires, in one place:
+//   - the envelope schema (ErrorResponse) to agree with the expectation;
+//   - the inner object to match BudgetExhaustedDetail exactly when valid, and
+//     to be rejected by it, naming the offending property, when invalid;
+//   - the generic detail (ErrorDetail) to reject EVERY budget_exhausted object,
+//     valid or not, so the two ErrorResponse branches stay disjoint.
+//
+// It returns the first reason the object is rejected, or nil if it is valid.
+func checkBudgetError(t *testing.T, doc *openapi3.T, v any, wantValid bool) error {
+	t.Helper()
+	body, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("budget-error fixture is not an object")
+	}
+	inner := body["error"]
+	envelope := visit(schemaByName(t, doc, "ErrorResponse"), v)
+	detail := visit(schemaByName(t, doc, "BudgetExhaustedDetail"), inner)
+	generic := visit(schemaByName(t, doc, "ErrorDetail"), inner)
+	if generic == nil {
+		t.Errorf("the generic ErrorDetail accepted a budget_exhausted object; the branches are not disjoint")
+	}
+	if wantValid {
+		if envelope != nil || detail != nil {
+			return fmt.Errorf("valid budget error rejected: envelope=%v detail=%v", envelope, detail)
+		}
+		return nil
+	}
+	if envelope == nil {
+		t.Errorf("ErrorResponse accepted an invalid budget error (the generic branch must not match it)")
+	}
+	if detail == nil {
+		t.Errorf("BudgetExhaustedDetail accepted an invalid budget error")
+		return nil
+	}
+	return detail
 }
 
 // --- SSE stream checks (ADR-005 section 5 and 6) ---
@@ -356,4 +402,33 @@ func checkStream(t *testing.T, doc *openapi3.T, text string) error {
 		}
 	}
 	return fmt.Errorf("stream ended without [DONE] or an error event; normal completion must end with [DONE]")
+}
+
+// Structural guard for the review finding: the generic error detail must not
+// be able to carry budget_exhausted, and the budget detail must require both
+// scope and reset_at, so ErrorResponse's two branches are disjoint.
+func TestGatewayErrorBranchesAreDisjoint(t *testing.T) {
+	doc := loadGatewayDoc(t)
+	for _, c := range schemaByName(t, doc, "ErrorDetail").Properties["code"].Value.Enum {
+		if c == "budget_exhausted" {
+			t.Fatal("ErrorDetail still allows budget_exhausted, which would bypass the required scope and reset_at")
+		}
+	}
+	budget := schemaByName(t, doc, "BudgetExhaustedDetail")
+	req := map[string]bool{}
+	for _, r := range budget.Required {
+		req[r] = true
+	}
+	for _, f := range []string{"code", "message", "request_id", "scope", "reset_at"} {
+		if !req[f] {
+			t.Errorf("BudgetExhaustedDetail does not require %q", f)
+		}
+	}
+	if len(budget.Properties["code"].Value.Enum) != 1 || budget.Properties["code"].Value.Enum[0] != "budget_exhausted" {
+		t.Error("BudgetExhaustedDetail must be fixed to the single code budget_exhausted")
+	}
+	branches := schemaByName(t, doc, "ErrorResponse").Properties["error"].Value.OneOf
+	if len(branches) != 2 {
+		t.Fatalf("ErrorResponse.error has %d branches, want exactly the generic and the budget detail", len(branches))
+	}
 }

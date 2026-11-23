@@ -20,6 +20,12 @@
       "valid": true
     },
     {
+      "file": "valid/chat-request-max-tokens-max-safe.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": true
+    },
+    {
       "file": "valid/tool-request-search.json",
       "kind": "schema",
       "schema": "ToolCallRequest",
@@ -98,6 +104,22 @@
       "valid": false,
       "why": "max_tokens must be at least 1",
       "expectError": "max_tokens"
+    },
+    {
+      "file": "invalid/chat-request-max-tokens-above-safe.json",
+      "kind": "schema",
+      "schema": "ChatCompletionRequest",
+      "valid": false,
+      "why": "max_tokens above 2^53-1 cannot be audited losslessly",
+      "expectError": "max_tokens"
+    },
+    {
+      "file": "invalid/chat-response-usage-above-safe.json",
+      "kind": "schema",
+      "schema": "ChatCompletionResponse",
+      "valid": false,
+      "why": "usage above 2^53-1",
+      "expectError": "completion_tokens"
     },
     {
       "file": "invalid/chat-request-identity-tenant.json",
@@ -218,6 +240,51 @@
       "valid": false,
       "why": "budget_exhausted needs scope and reset_at",
       "expectError": "scope"
+    },
+    {
+      "file": "invalid/budget-error-missing-scope.json",
+      "kind": "budget-error",
+      "valid": false,
+      "why": "scope is missing",
+      "expectError": "scope"
+    },
+    {
+      "file": "invalid/budget-error-missing-reset-at.json",
+      "kind": "budget-error",
+      "valid": false,
+      "why": "reset_at is missing",
+      "expectError": "reset_at"
+    },
+    {
+      "file": "invalid/budget-error-missing-both.json",
+      "kind": "budget-error",
+      "valid": false,
+      "why": "scope and reset_at are both missing",
+      "expectError": "scope"
+    },
+    {
+      "file": "invalid/budget-error-bad-scope.json",
+      "kind": "budget-error",
+      "valid": false,
+      "why": "scope must be agent or tenant",
+      "expectError": "scope"
+    },
+    {
+      "file": "invalid/budget-error-bad-reset-at.json",
+      "kind": "budget-error",
+      "valid": false,
+      "why": "reset_at must be an RFC 3339 date-time",
+      "expectError": "reset_at"
+    },
+    {
+      "file": "valid/budget-error-agent.json",
+      "kind": "budget-error",
+      "valid": true
+    },
+    {
+      "file": "valid/budget-error-tenant.json",
+      "kind": "budget-error",
+      "valid": true
     },
     {
       "file": "valid/chat-400-invalid-request.json",
@@ -418,6 +485,24 @@
       "expectError": "reset_at"
     },
     {
+      "file": "invalid/chat-429-budget-missing-scope.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": false,
+      "why": "budget_exhausted needs scope",
+      "expectError": "scope"
+    },
+    {
+      "file": "invalid/chat-429-budget-missing-both.json",
+      "kind": "response",
+      "operation": "POST /v1/chat/completions",
+      "status": 429,
+      "valid": false,
+      "why": "budget_exhausted needs scope and reset_at",
+      "expectError": ""
+    },
+    {
       "file": "invalid/chat-429-wrong-code.json",
       "kind": "response",
       "operation": "POST /v1/chat/completions",
@@ -562,6 +647,27 @@
       "valid": false,
       "why": "error event must be terminal",
       "expectError": "after"
+    },
+    {
+      "file": "streams/invalid-error-budget-missing-scope.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "stream budget error without scope",
+      "expectError": "error event"
+    },
+    {
+      "file": "streams/invalid-error-budget-missing-reset-at.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "stream budget error without reset_at",
+      "expectError": "error event"
+    },
+    {
+      "file": "streams/invalid-error-budget-missing-both.sse",
+      "kind": "stream",
+      "valid": false,
+      "why": "stream budget error with neither scope nor reset_at",
+      "expectError": "error event"
     },
     {
       "file": "streams/invalid-bad-event.sse",

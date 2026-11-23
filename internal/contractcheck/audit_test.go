@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -51,7 +52,8 @@ type auditManifest struct {
 		File  string `json:"file"`
 		Valid bool   `json:"valid"`
 	} `json:"record_schema"`
-	UsageTotals map[string]map[string]int64 `json:"usage_totals"`
+	UsageTotals   map[string]map[string]int64 `json:"usage_totals"`
+	TotalsRefused []string                    `json:"totals_refused"`
 }
 
 func auditDir(t *testing.T) string { return filepath.Join(repoRoot(t), "docs", "audit") }
@@ -102,13 +104,60 @@ func decodeExact(raw []byte, out any) error {
 	return d.Decode(out)
 }
 
-func canonicalBytes(t testing.TB, v any) []byte {
-	t.Helper()
+// maxSafeInteger is 2^53-1, the largest integer a binary64 canonicalizer
+// (RFC 8785 serializes numbers as IEEE-754 doubles) represents exactly.
+const maxSafeInteger = 9007199254740991
+
+var integerText = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+
+// checkSafeNumbers enforces the contract's numeric domain BEFORE
+// canonicalization: every number must be a plain non-negative decimal integer
+// no larger than maxSafeInteger. Without this guard the jcs library silently
+// rounds, so 9007199254740993 would canonicalize as 9007199254740992 and two
+// distinct values would share canonical bytes.
+func checkSafeNumbers(v any) error {
+	switch x := v.(type) {
+	case json.Number:
+		if !integerText.MatchString(x.String()) {
+			return fmt.Errorf("number %q is not a plain non-negative decimal integer", x.String())
+		}
+		n, err := x.Int64()
+		if err != nil || n > maxSafeInteger {
+			return fmt.Errorf("integer %s is outside the safe range 0..%d", x.String(), int64(maxSafeInteger))
+		}
+	case float64:
+		return fmt.Errorf("floating point value %v is not allowed", x)
+	case map[string]any: // also obj, which is an alias
+		for _, e := range x {
+			if err := checkSafeNumbers(e); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, e := range x {
+			if err := checkSafeNumbers(e); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// canonicalize returns the RFC 8785 bytes, refusing out-of-domain numbers.
+func canonicalize(v any) ([]byte, error) {
+	if err := checkSafeNumbers(v); err != nil {
+		return nil, err
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	out, err := jcs.Transform(b)
+	return jcs.Transform(b)
+}
+
+func canonicalBytes(t testing.TB, v any) []byte {
+	t.Helper()
+	out, err := canonicalize(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +227,24 @@ func contentWithoutLinkage(rec obj) obj {
 	return c
 }
 
+// verifyChain applies, in order: linkage and hashing (ADR-006 section 6), the
+// semantic rules (identity and event keys), then the duplicate-event rule.
 func verifyChain(t testing.TB, chainID string, recs []obj) result {
+	return verifyChainWith(t, chainID, recs, true)
+}
+
+// verifyStructure is verifyChain minus the duplicate_event anomaly. Usage totals
+// are only accepted for chains that pass it. An IDENTICAL repeat of an event
+// (a retried append) is tolerated there because totals count each distinct
+// event key once; a repeat with DIFFERENT content for the same key is a
+// conflict and is never tolerated, since deduplication would silently pick one
+// of two disagreeing events. A broken link, inconsistent identity or wrong
+// event key is never summed either.
+func verifyStructure(t testing.TB, chainID string, recs []obj) result {
+	return verifyChainWith(t, chainID, recs, false)
+}
+
+func verifyChainWith(t testing.TB, chainID string, recs []obj, reportIdenticalDuplicates bool) result {
 	byIndex := map[int][]obj{}
 	maxIdx := -1
 	for _, r := range recs {
@@ -201,6 +267,9 @@ func verifyChain(t testing.TB, chainID string, recs []obj) result {
 			return fail("duplicate_index", e)
 		}
 		r := rs[0]
+		if err := checkSafeNumbers(r); err != nil {
+			return fail("unsafe_integer", e)
+		}
 		if r["prev_hash"] != prev {
 			return fail("prev_hash_mismatch", e)
 		}
@@ -209,19 +278,115 @@ func verifyChain(t testing.TB, chainID string, recs []obj) result {
 		}
 		prev, _ = r["record_hash"].(string)
 	}
-	// Semantic rule: each event_key at most once. Duplicates link correctly,
-	// so the hash checks above cannot see them.
-	first := map[string]obj{}
+	ordered := make([]obj, 0, maxIdx+1)
 	for e := 0; e <= maxIdx; e++ {
-		r := byIndex[e][0]
+		ordered = append(ordered, byIndex[e][0])
+	}
+	if r := checkSemantics(chainID, ordered); !r.OK {
+		return r
+	}
+	// Each event_key at most once. Repeats link correctly, so the hash checks
+	// above cannot see them. A conflicting repeat is always a failure; an
+	// identical repeat is a failure only for the full verifier.
+	first := map[string]obj{}
+	for e, r := range ordered {
 		key, _ := r["event_key"].(string)
 		if prior, seen := first[key]; seen {
-			if string(canonicalBytes(t, contentWithoutLinkage(prior))) == string(canonicalBytes(t, contentWithoutLinkage(r))) {
+			if string(canonicalBytes(t, contentWithoutLinkage(prior))) != string(canonicalBytes(t, contentWithoutLinkage(r))) {
+				return fail("conflicting_event", e)
+			}
+			if reportIdenticalDuplicates {
 				return fail("duplicate_event", e)
 			}
-			return fail("conflicting_event", e)
+			continue
 		}
 		first[key] = r
+	}
+	return result{OK: true}
+}
+
+var (
+	requestIDRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	corrSeqRe     = regexp.MustCompile(`^[1-9][0-9]{0,14}$`)
+	platformChain = "_platform"
+)
+
+// expectedEventKey derives the event_key a record must carry from its
+// request_id, event and, for corrections, the sequence in the key itself. It
+// returns the sequence (0 when the event has none) and whether the key is the
+// derived one.
+func expectedEventKey(r obj) (seq int, ok bool) {
+	rid, _ := r["request_id"].(string)
+	ev, _ := r["event"].(string)
+	key, _ := r["event_key"].(string)
+	if !requestIDRe.MatchString(rid) {
+		return 0, false
+	}
+	if ev != "correction" {
+		return 0, key == rid+":"+ev && (ev == "admitted" || ev == "completed" || ev == "rejected")
+	}
+	prefix := rid + ":correction:"
+	if !strings.HasPrefix(key, prefix) || !corrSeqRe.MatchString(strings.TrimPrefix(key, prefix)) {
+		return 0, false
+	}
+	n, _ := strconv.Atoi(strings.TrimPrefix(key, prefix))
+	return n, true
+}
+
+// checkSemantics is the TEST-ONLY semantic layer (ADR-005/006): rules a JSON
+// Schema cannot express because they compare fields. It runs in index order and
+// returns the first violation.
+//   - every record's chain_id is the chain being verified;
+//   - the _platform chain holds only rejected events with null tenant and agent;
+//   - a tenant chain has non-null tenant and agent, and tenant equals chain_id;
+//   - every request's entries agree on tenant and agent;
+//   - event_key is derived from request_id and event (and the correction
+//     sequence), and correction sequences per request start at 1 and have no gaps.
+func checkSemantics(chainID string, ordered []obj) result {
+	type who struct{ tenant, agent any }
+	byRequest := map[string]who{}
+	corrMax := map[string]int{}
+	seenKey := map[string]bool{}
+	for e, r := range ordered {
+		if r["chain_id"] != chainID {
+			return fail("record_chain_mismatch", e)
+		}
+		ev, _ := r["event"].(string)
+		if chainID == platformChain {
+			if ev != "rejected" {
+				return fail("platform_event_violation", e)
+			}
+			if r["tenant"] != nil || r["agent"] != nil {
+				return fail("platform_identity_violation", e)
+			}
+		} else {
+			tenant, tok := r["tenant"].(string)
+			agent, aok := r["agent"].(string)
+			if !tok || !aok || tenant == "" || agent == "" {
+				return fail("identity_null_in_tenant_chain", e)
+			}
+			if tenant != chainID {
+				return fail("tenant_chain_mismatch", e)
+			}
+		}
+		rid, _ := r["request_id"].(string)
+		w := who{r["tenant"], r["agent"]}
+		if prior, ok := byRequest[rid]; ok && prior != w {
+			return fail("request_identity_inconsistent", e)
+		}
+		byRequest[rid] = w
+		seq, ok := expectedEventKey(r)
+		if !ok {
+			return fail("event_key_mismatch", e)
+		}
+		key, _ := r["event_key"].(string)
+		if ev == "correction" && !seenKey[key] {
+			if seq != corrMax[rid]+1 {
+				return fail("correction_seq_gap", e)
+			}
+			corrMax[rid] = seq
+		}
+		seenKey[key] = true
 	}
 	return result{OK: true}
 }
@@ -250,6 +415,16 @@ func usageTotals(recs []obj, distinct bool) map[string]int64 {
 		}
 	}
 	return tot
+}
+
+// totalsFor returns the per-request usage only for a chain that passes
+// linkage, hashing and the semantic rules; otherwise it returns the failure and
+// no totals, so a forged identity or event key can never be summed.
+func totalsFor(t testing.TB, chainID string, recs []obj) (map[string]int64, result) {
+	if r := verifyStructure(t, chainID, recs); !r.OK {
+		return nil, r
+	}
+	return usageTotals(recs, true), result{OK: true}
 }
 
 // ---- checkpoint verification (ADR-006 section 7) ----
@@ -311,6 +486,9 @@ func parseCheckpoint(raw []byte) (*checkpoint, string) {
 	}
 	cn, ok := p["count"].(json.Number)
 	if !ok {
+		return nil, "malformed"
+	}
+	if checkSafeNumbers(p) != nil { // count (and version) must be safe plain integers
 		return nil, "malformed"
 	}
 	count, err := cn.Int64()
@@ -622,8 +800,11 @@ func TestAuditCheckpointRegressionIsRejected(t *testing.T) {
 func TestAuditTotalsUseDistinctEventKeys(t *testing.T) {
 	m := loadAuditManifest(t)
 	for file, want := range m.UsageTotals {
-		_, recs := loadChain(t, file)
-		got := usageTotals(recs, true)
+		chainID, recs := loadChain(t, file)
+		got, r := totalsFor(t, chainID, recs)
+		if !r.OK {
+			t.Fatalf("%s: totals refused for a chain that should be acceptable: %+v", file, r)
+		}
 		for rid, w := range want {
 			if got[rid] != w {
 				t.Errorf("%s: distinct total for %s = %d, want %d", file, rid, got[rid], w)
@@ -638,11 +819,72 @@ func TestAuditTotalsUseDistinctEventKeys(t *testing.T) {
 	}
 }
 
+// Totals are only accepted for chains that pass linkage, hashing and the
+// semantic rules: a forged identity or event key must never be summed, even
+// though every hash in the chain is consistent.
+func TestAuditTotalsAreRefusedForInvalidChains(t *testing.T) {
+	m := loadAuditManifest(t)
+	if len(m.TotalsRefused) < 10 {
+		t.Fatalf("manifest lists only %d chains whose totals must be refused", len(m.TotalsRefused))
+	}
+	// The totals-refusal list is part of the contract, so specific entries are
+	// required, not merely "enough" of them: the reviewer's counterexamples for
+	// identity, event keys and conflicting repeated keys must stay covered.
+	listed := map[string]bool{}
+	for _, f := range m.TotalsRefused {
+		listed[f] = true
+	}
+	for _, f := range []string{
+		"chain-conflicting-event.json",
+		"chain-null-identity-in-tenant-chain.json",
+		"chain-event-key-other-request.json",
+		"chain-unsafe-integer.json",
+	} {
+		if !listed[f] {
+			t.Errorf("%s must be in totals_refused (its totals must never be accepted)", f)
+		}
+	}
+	for _, file := range m.TotalsRefused {
+		chainID, recs := loadChain(t, file)
+		totals, r := totalsFor(t, chainID, recs)
+		if r.OK || totals != nil {
+			t.Errorf("%s: totals were accepted (%v) although the chain is invalid", file, totals)
+		}
+	}
+}
+
+// Repeated event keys: identical content is a retry (totals count the key once,
+// the verifier still reports the duplicate), different content is a conflict
+// and must never be summed (review r2 finding 2).
+func TestAuditTotalsRefuseConflictingEventsButTolerateIdenticalDuplicates(t *testing.T) {
+	id, conflict := loadChain(t, "chain-conflicting-event.json")
+	if totals, r := totalsFor(t, id, conflict); r.OK || totals != nil || r.Reason != "conflicting_event" {
+		t.Errorf("totals for a chain with conflicting content under one event_key must be refused as conflicting_event, got totals=%v result=%+v", totals, r)
+	}
+	if r := verifyChain(t, id, conflict); r.OK || r.Reason != "conflicting_event" {
+		t.Errorf("verifier must still report conflicting_event, got %+v", r)
+	}
+	id, dup := loadChain(t, "chain-duplicate-correction.json")
+	totals, r := totalsFor(t, id, dup)
+	if !r.OK {
+		t.Fatalf("identical duplicates must not block totals: %+v", r)
+	}
+	if got := totals["req_0002"]; got != 9192 {
+		t.Errorf("distinct-key total for req_0002 = %d, want 9192", got)
+	}
+	if naive := usageTotals(dup, false)["req_0002"]; naive == totals["req_0002"] {
+		t.Errorf("fixture does not show the double count (naive %d)", naive)
+	}
+	if r := verifyChain(t, id, dup); r.OK || r.Reason != "duplicate_event" {
+		t.Errorf("verifier must still report duplicate_event, got %+v", r)
+	}
+}
+
 // Every chain and checkpoint file must be used by a verification case or a
 // schema check, so no fixture is dead weight.
 func TestAuditFixturesAreAllReferenced(t *testing.T) {
 	m := loadAuditManifest(t)
-	used := map[string]bool{"manifest.json": true, "vectors.json": true, "key-registry.json": true}
+	used := map[string]bool{"manifest.json": true, "vectors.json": true, "boundary-vectors.json": true, "key-registry.json": true}
 	for _, c := range m.Cases {
 		used[c.Chain] = true
 		for _, f := range c.Checkpoints {

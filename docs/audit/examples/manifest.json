@@ -395,6 +395,164 @@
         "first_broken_index": null
       },
       "why": ""
+    },
+    {
+      "name": "integer outside the safe range is rejected before canonicalization",
+      "chain": "chain-unsafe-integer.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "unsafe_integer",
+        "first_broken_index": 0
+      },
+      "why": "2^53+1 would collapse to 2^53 in a binary64 canonicalizer"
+    },
+    {
+      "name": "checkpoint count above the safe range is malformed",
+      "chain": "chain-valid.json",
+      "checkpoints": [
+        "checkpoint-unsafe-count.json"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "malformed",
+        "first_broken_index": null
+      },
+      "why": ""
+    },
+    {
+      "name": "checkpoint count at the safe maximum parses but its signature does not match",
+      "chain": "chain-valid.json",
+      "checkpoints": [
+        "checkpoint-max-safe-count.json"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "bad_signature",
+        "first_broken_index": null
+      },
+      "why": ""
+    },
+    {
+      "name": "semantic rule: chain-null-identity-in-tenant-chain.json",
+      "chain": "chain-null-identity-in-tenant-chain.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "identity_null_in_tenant_chain",
+        "first_broken_index": 0
+      },
+      "why": "tenant and agent are null outside the _platform chain"
+    },
+    {
+      "name": "semantic rule: chain-null-agent-in-tenant-chain.json",
+      "chain": "chain-null-agent-in-tenant-chain.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "identity_null_in_tenant_chain",
+        "first_broken_index": 0
+      },
+      "why": "agent is null in a tenant chain"
+    },
+    {
+      "name": "semantic rule: chain-tenant-mismatch.json",
+      "chain": "chain-tenant-mismatch.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "tenant_chain_mismatch",
+        "first_broken_index": 0
+      },
+      "why": "record tenant differs from the chain tenant"
+    },
+    {
+      "name": "semantic rule: chain-record-chain-id-mismatch.json",
+      "chain": "chain-record-chain-id-mismatch.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "record_chain_mismatch",
+        "first_broken_index": 0
+      },
+      "why": "record claims another chain_id"
+    },
+    {
+      "name": "semantic rule: chain-platform-with-tenant.json",
+      "chain": "chain-platform-with-tenant.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "platform_identity_violation",
+        "first_broken_index": 0
+      },
+      "why": "the _platform chain must have null tenant and agent"
+    },
+    {
+      "name": "semantic rule: chain-platform-non-rejected-event.json",
+      "chain": "chain-platform-non-rejected-event.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "platform_event_violation",
+        "first_broken_index": 0
+      },
+      "why": "the _platform chain holds only rejected events"
+    },
+    {
+      "name": "semantic rule: chain-event-key-other-request.json",
+      "chain": "chain-event-key-other-request.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "event_key_mismatch",
+        "first_broken_index": 0
+      },
+      "why": "event_key prefix is a different request id, chain consistently rehashed (review counterexample)"
+    },
+    {
+      "name": "semantic rule: chain-event-key-wrong-event.json",
+      "chain": "chain-event-key-wrong-event.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "event_key_mismatch",
+        "first_broken_index": 0
+      },
+      "why": "event_key suffix does not match the event"
+    },
+    {
+      "name": "semantic rule: chain-event-key-correction-seq-zero.json",
+      "chain": "chain-event-key-correction-seq-zero.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "event_key_mismatch",
+        "first_broken_index": 4
+      },
+      "why": "correction sequence starts at 1"
+    },
+    {
+      "name": "semantic rule: chain-event-key-correction-seq-gap.json",
+      "chain": "chain-event-key-correction-seq-gap.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "correction_seq_gap",
+        "first_broken_index": 4
+      },
+      "why": "first correction of a request must be sequence 1"
+    },
+    {
+      "name": "semantic rule: chain-request-identity-inconsistent.json",
+      "chain": "chain-request-identity-inconsistent.json",
+      "checkpoints": [],
+      "expect": {
+        "ok": false,
+        "reason": "request_identity_inconsistent",
+        "first_broken_index": 3
+      },
+      "why": "one request, two agents"
     }
   ],
   "checkpoint_schema": [
@@ -439,6 +597,10 @@
       "schema_valid": true
     },
     {
+      "file": "checkpoint-max-safe-count.json",
+      "schema_valid": true
+    },
+    {
       "file": "checkpoint-missing-sig.json",
       "schema_valid": false
     },
@@ -453,6 +615,10 @@
     {
       "file": "checkpoint-unknown-key.json",
       "schema_valid": true
+    },
+    {
+      "file": "checkpoint-unsafe-count.json",
+      "schema_valid": false
     },
     {
       "file": "checkpoint-unsupported-version.json",
@@ -493,6 +659,22 @@
       "valid": false
     },
     {
+      "file": "records/invalid-event-key-correction-no-seq.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-event-key-correction-seq-zero.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-event-key-no-event.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-event-key-wrong-suffix.json",
+      "valid": false
+    },
+    {
       "file": "records/invalid-fail-open-wrong-value.json",
       "valid": false
     },
@@ -513,6 +695,18 @@
       "valid": false
     },
     {
+      "file": "records/invalid-platform-chain-non-rejected.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-platform-chain-with-agent.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-platform-chain-with-tenant.json",
+      "valid": false
+    },
+    {
       "file": "records/invalid-rejected-bad-status.json",
       "valid": false
     },
@@ -521,7 +715,19 @@
       "valid": false
     },
     {
+      "file": "records/invalid-request-id-with-colon.json",
+      "valid": false
+    },
+    {
       "file": "records/invalid-short-hash.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-tenant-chain-null-agent.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-tenant-chain-null-identity.json",
       "valid": false
     },
     {
@@ -530,6 +736,38 @@
     },
     {
       "file": "records/invalid-unknown-event.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-charged-tokens.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-corrected-total.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-delta-tokens.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-index.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-request-size.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-reserved-tokens-2pow53-plus1.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-reserved-tokens-2pow53.json",
+      "valid": false
+    },
+    {
+      "file": "records/invalid-unsafe-tokens-in.json",
       "valid": false
     },
     {
@@ -542,6 +780,10 @@
     },
     {
       "file": "records/valid-admitted.json",
+      "valid": true
+    },
+    {
+      "file": "records/valid-boundary-max-safe-integers.json",
       "valid": true
     },
     {
@@ -576,5 +818,25 @@
       "req_0002": 9192,
       "req_0004": 0
     }
-  }
+  },
+  "totals_refused": [
+    "chain-null-identity-in-tenant-chain.json",
+    "chain-null-agent-in-tenant-chain.json",
+    "chain-tenant-mismatch.json",
+    "chain-record-chain-id-mismatch.json",
+    "chain-platform-with-tenant.json",
+    "chain-platform-non-rejected-event.json",
+    "chain-event-key-other-request.json",
+    "chain-event-key-wrong-event.json",
+    "chain-event-key-correction-seq-zero.json",
+    "chain-event-key-correction-seq-gap.json",
+    "chain-request-identity-inconsistent.json",
+    "chain-conflicting-event.json",
+    "chain-modified.json",
+    "chain-modified-rehashed.json",
+    "chain-deleted-middle.json",
+    "chain-reordered.json",
+    "chain-wrong-genesis.json",
+    "chain-unsafe-integer.json"
+  ]
 }

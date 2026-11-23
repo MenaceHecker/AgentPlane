@@ -63,6 +63,14 @@ test: ## Run Go unit tests with the race detector
 secrets: ## Scan tracked working-tree files with gitleaks (redacted output)
 	@scripts/scan-secrets.sh
 
+.PHONY: secrets-history
+secrets-history: ## Scan every line ever added to go.sum (gitleaks' default history scan skips go.sum)
+	@scripts/scan-secrets.sh --go-sum-history
+
+.PHONY: secrets-selftest
+secrets-selftest: ## Regression-test the secret scanner itself (needs gitleaks)
+	@scripts/test-secrets.sh
+
 .PHONY: contracts-check
 contracts-check: ## Validate gateway and audit contract fixtures (needs go and python3)
 	@scripts/check-contracts.sh
