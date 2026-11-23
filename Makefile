@@ -3,6 +3,11 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
+# Pinned tool versions. CI installs the same versions (see .github/workflows/ci.yml).
+GOLANGCI_LINT_VERSION ?= 2.15.0
+GITLEAKS_VERSION ?= 8.30.1
+export GOLANGCI_LINT_VERSION GITLEAKS_VERSION
+
 # Local kind cluster name. Only this named cluster is ever created or deleted.
 KIND_CLUSTER_NAME ?= agentplane
 
@@ -37,3 +42,19 @@ kind-down: check-kind-prereqs ## Delete the named local kind cluster (destroys i
 	else \
 	  echo "kind cluster '$(KIND_CLUSTER_NAME)' does not exist; nothing to do."; \
 	fi
+
+.PHONY: fmt-check
+fmt-check: ## Check Go formatting without modifying files
+	@scripts/check-go.sh fmt-check
+
+.PHONY: lint
+lint: ## Run golangci-lint (pinned version) on the Go module
+	@scripts/check-go.sh lint
+
+.PHONY: test
+test: ## Run Go unit tests with the race detector
+	@scripts/check-go.sh test
+
+.PHONY: secrets
+secrets: ## Scan tracked working-tree files with gitleaks (redacted output)
+	@scripts/scan-secrets.sh

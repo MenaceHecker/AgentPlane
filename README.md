@@ -14,7 +14,16 @@ Go (Kubebuilder/controller-runtime), Terraform (azurerm), Flux, Argo Rollouts, O
 
 ## Prerequisites
 
-Planned local tooling: Git, GNU Make, Docker, kind. Quality and secret-scanning tooling is documented as it is added.
+Git, GNU Make, Docker and kind for the local cluster; plus the pinned quality tooling below.
+
+| Tool | Pinned version | Install |
+| --- | --- | --- |
+| pre-commit | 4.7.0 | `pip install pre-commit==4.7.0` |
+| gitleaks | 8.30.1 | `brew install gitleaks` or a release binary from github.com/gitleaks/gitleaks |
+| golangci-lint | 2.15.0 | needed only once a Go module exists; github.com/golangci/golangci-lint |
+| Go | declared by `go.mod` once it exists (P0-T3) | golang.org/dl |
+
+The `Makefile` fails with an actionable message if gitleaks (or golangci-lint, when a Go module exists) is missing or not the pinned version. A missing tool is never treated as a pass.
 
 ## Directory map
 
@@ -45,6 +54,19 @@ Directories other than `agents/` and `docs/` are placeholders (`.gitkeep`) at th
 | `make kind-down` | Deletes only the named cluster, **destroying its workloads**. Does nothing if it does not exist. |
 
 Override the name with `KIND_CLUSTER_NAME=<name>`. `kind create cluster` merges into your user kubeconfig (`~/.kube/config`) and switches the current context to `kind-<name>`; nothing is written into this repository. Check `kubectl config current-context` before running other kubectl commands. The labeled multi-node configuration arrives in P0-T5. Per the agent rules, the executor agent must have explicit owner authorization before running `make kind-down`.
+
+## Quality checks
+
+| Command | Effect |
+| --- | --- |
+| `make fmt-check` | Fails if Go files are not `gofmt`-formatted. Never rewrites files. |
+| `make lint` | Runs `golangci-lint run ./...` at the pinned version. |
+| `make test` | Runs `go test -race ./...`. |
+| `make secrets` | Scans every tracked working-tree file with gitleaks, redacted output. |
+
+Until a Go module exists (P0-T3) the three Go targets print `NOT APPLICABLE: Go module not introduced (P0-T3)` and succeed. Once `go.mod` exists they run for real and propagate failures. Go source without a root `go.mod` is an error. The checks live in `scripts/check-go.sh` and `scripts/scan-secrets.sh`.
+
+Hooks: `pre-commit install --hook-type pre-commit --hook-type pre-push`, then `pre-commit run --all-files` to run everything on demand. Hooks call the same make targets (`make test` runs at pre-push). Validate the configuration with `pre-commit validate-config`.
 
 ## Contributing workflow
 
