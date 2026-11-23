@@ -2,7 +2,7 @@
 # Scan tracked files with gitleaks, redacting findings.
 #
 #   scan-secrets.sh                  scan every tracked working-tree file
-#   scan-secrets.sh --go-sum-history scan every line ever added to the root go.sum
+#   scan-secrets.sh --go-sum-history scan every line of every historical go.sum
 #
 # Fails if any file has a finding, if no file was scanned, or if the scan itself
 # errors (missing tool, wrong version, unreadable file list).
@@ -49,15 +49,20 @@ scan_go_sum() {
 
 if [ "${1:-}" = "--go-sum-history" ]; then
   git rev-parse --git-dir >/dev/null
-  # every line ever added to the root go.sum, without the diff markers
-  added="$(git log --all --no-color -p --format= -- go.sum | { grep -E '^\+[^+]|^\+$' || [ $? -eq 1 ]; } | sed 's/^+//' | sort -u)"
+  # Every distinct line of every historical version of the root go.sum, read from
+  # the file contents at each commit that touches it. Reading contents (not
+  # diffs) means no line is lost to diff syntax: a content line that starts with
+  # "+" would look like a diff header in `git log -p` output.
+  added="$(git log --all --format=%H -- go.sum | while IFS= read -r c; do
+    if git cat-file -e "$c:go.sum" 2>/dev/null; then git show "$c:go.sum"; fi
+  done | sort -u)"
   if [ -z "$added" ]; then
     echo "go.sum history: no go.sum lines in history; nothing to scan"
     exit 0
   fi
   n="$(printf '%s\n' "$added" | wc -l | tr -d ' ')"
   if printf '%s\n' "$added" | { grep -Ev "$GOSUM_ENTRY" || [ $? -eq 1 ]; } | scan_stdin; then
-    echo "go.sum history: scanned $n distinct added lines, exit 0"
+    echo "go.sum history: scanned $n distinct historical lines, exit 0"
     exit 0
   fi
   echo "SECRET SCAN FAILED: go.sum history" >&2

@@ -119,6 +119,22 @@ hist "$d"; if [ "$rc" -ne 0 ] && grep -q "SECRET SCAN FAILED: go.sum history" "$
 ( cd "$d" && bash scripts/scan-secrets.sh ) >"$work/out" 2>&1; rc=$?
 if [ "$rc" -eq 0 ]; then ok "(control) the same repository's current tree is clean, so only the history scan sees the removed key"; else bad "current tree should be clean (exit $rc)"; fi
 
+# A removed secret whose own text starts with "+" must still be found. In a
+# unified diff an added line is "+" followed by the content, so content that
+# starts with "+" appears as "++..." or "+++...", which a diff parser that
+# skips header-looking lines would drop (review r2 finding 1).
+for prefix in '+' '++' '+++'; do
+  name="hist-plus-$(printf '%s' "$prefix" | wc -c | tr -d ' ')"
+  d="$(newrepo "$name")"
+  printf '%s github_token = "ghp_%s"\n' "$prefix" "$(rand 36)" >"$d/go.sum"
+  ( cd "$d" && git add -A && git commit -q -m add-secret )
+  expect_detect "(control) a line starting with '$prefix' holding a token is detected while it is in go.sum" "$d" "go.sum"
+  ( cd "$d" && valid_line_content=$(printf 'github.com/example/apikey-client v1.2.3 h1:%s=\n' "$(rand 43)") && printf '%s' "$valid_line_content" >go.sum && git add -A && git commit -q -m remove-secret )
+  scan "$d"; if [ "$rc" -eq 0 ]; then ok "(control) after removal the current tree is clean for prefix '$prefix'"; else bad "tree should be clean after removal (prefix '$prefix', exit $rc)"; fi
+  hist "$d"
+  if [ "$rc" -ne 0 ] && grep -q "SECRET SCAN FAILED: go.sum history" "$work/out"; then ok "a removed secret on a line starting with '$prefix' is found in go.sum history"; else bad "history scan missed a removed secret on a line starting with '$prefix' (exit $rc)"; sed 's/^/        /' "$work/out" | head -3; fi
+done
+
 d="$(newrepo hist-no-gosum)"; echo hi >"$d/a.txt"; ( cd "$d" && git add -A && git commit -q -m a )
 hist "$d"; if [ "$rc" -eq 0 ]; then ok "a repository with no go.sum history passes the history scan"; else bad "no-go.sum history failed (exit $rc)"; fi
 
