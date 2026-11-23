@@ -1,0 +1,51 @@
+# Secrets and credentials. Never commit these.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+.kube/
+
+# Terraform state, plans and working directories
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+crash.log
+crash.*.log
+.terraform/
+.terraform.tfstate.lock.info
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+
+# Local binaries and build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Coverage output
+coverage.out
+coverage.html
+*.coverprofile
+
+# Temporary and editor files
+tmp/
+*.tmp
+*.swp
+.DS_Store
+.idea/
+.vscode/
