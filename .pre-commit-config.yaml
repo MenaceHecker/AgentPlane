@@ -1,0 +1,46 @@
+# Install: pip install pre-commit==4.7.0 && pre-commit install --hook-type pre-commit --hook-type pre-push
+# Local hooks call the same make targets that CI runs, so checks stay shared.
+# No hook here rewrites files; formatting is checked, never silently fixed.
+minimum_pre_commit_version: "4.7.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  - repo: local
+    hooks:
+      - id: fmt-check
+        name: gofmt check (make fmt-check)
+        entry: make fmt-check
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: lint
+        name: golangci-lint (make lint)
+        entry: make lint
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: secrets
+        name: gitleaks tracked files (make secrets)
+        entry: make secrets
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: unit-test
+        name: go test -race (make test)
+        entry: make test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
