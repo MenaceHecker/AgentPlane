@@ -35,6 +35,17 @@ Planned local tooling: Git, GNU Make, Docker, kind. Quality and secret-scanning 
 
 Directories other than `agents/` and `docs/` are placeholders (`.gitkeep`) at this stage.
 
+## Local cluster commands
+
+`make` (or `make help`) lists targets and creates nothing.
+
+| Command | Effect |
+| --- | --- |
+| `make kind-up` | Creates a local kind cluster named `agentplane` using kind's default topology. Does nothing if it already exists. |
+| `make kind-down` | Deletes only the named cluster, **destroying its workloads**. Does nothing if it does not exist. |
+
+Override the name with `KIND_CLUSTER_NAME=<name>`. `kind create cluster` merges into your user kubeconfig (`~/.kube/config`) and switches the current context to `kind-<name>`; nothing is written into this repository. Check `kubectl config current-context` before running other kubectl commands. The labeled multi-node configuration arrives in P0-T5. Per the agent rules, the executor agent must have explicit owner authorization before running `make kind-down`.
+
 ## Contributing workflow
 
 Work is split between a planner/reviewer agent and an executor agent, coordinated through files. See [`AGENTS.md`](AGENTS.md) and [`agents/README.md`](agents/README.md).
