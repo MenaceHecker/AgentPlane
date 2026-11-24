@@ -146,3 +146,46 @@ func TestStrictDecodingKeepsValidInputsUnchanged(t *testing.T) {
 		t.Errorf("an explicit empty stop list and stream:false must not change the response:\n%s\n%s", plain, explicit)
 	}
 }
+
+// The differential test pins accept/reject. This table pins WHY: each null or
+// missing member gets a message naming it, so a caller can fix the request, and
+// no rejection depends on an unrelated later check happening to fail (for
+// example null max_tokens must be reported as null, not as "max_tokens 0").
+func TestNullAndMissingMembersAreNamedInTheError(t *testing.T) {
+	h := NewHandler(DefaultConfig())
+	u := `"messages":[{"role":"user","content":"hi"}]`
+	tests := []struct {
+		name, body, want string
+	}{
+		{"null model", `{"model":null,` + u + `}`, "model must not be null"},
+		{"null messages", `{"model":"m","messages":null}`, "messages must not be null"},
+		{"null message element", `{"model":"m","messages":[null]}`, "messages[0] must not be null"},
+		{"null role", `{"model":"m","messages":[{"role":null,"content":"hi"}]}`, "messages[0].role must not be null"},
+		{"null content", `{"model":"m","messages":[{"role":"user","content":null}]}`, "messages[0].content must not be null"},
+		{"missing content", `{"model":"m","messages":[{"role":"user"}]}`, "messages[0].content is required"},
+		{"missing role", `{"model":"m","messages":[{"content":"hi"}]}`, "messages[0].role is required"},
+		{"second message missing content", `{"model":"m","messages":[{"role":"user","content":"a"},{"role":"user"}]}`, "messages[1].content is required"},
+		{"unknown message member", `{"model":"m","messages":[{"role":"user","content":"hi","name":"n"}]}`, `unknown field "name"`},
+		{"null temperature", `{"model":"m",` + u + `,"temperature":null}`, "temperature must not be null"},
+		{"null top_p", `{"model":"m",` + u + `,"top_p":null}`, "top_p must not be null"},
+		{"null max_tokens", `{"model":"m",` + u + `,"max_tokens":null}`, "max_tokens must not be null"},
+		{"null stream", `{"model":"m",` + u + `,"stream":null}`, "stream must not be null"},
+		{"null stop", `{"model":"m",` + u + `,"stop":null}`, "stop must not be null"},
+		{"missing model", `{` + u + `}`, "model is required"},
+		{"missing messages", `{"model":"m"}`, "messages is required"},
+		{"the request is null", `null`, "must be a JSON object"},
+		{"unknown top-level member", `{"model":"m",` + u + `,"tenant":"acme"}`, `unknown field "tenant"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := do(t, h, http.MethodPost, ChatPath, tt.body)
+			var e errorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+				t.Fatalf("error body is not JSON: %v", err)
+			}
+			if rec.Code != http.StatusBadRequest || !strings.Contains(e.Error.Message, tt.want) {
+				t.Fatalf("want a 400 whose message mentions %q, got %d: %q", tt.want, rec.Code, e.Error.Message)
+			}
+		})
+	}
+}
