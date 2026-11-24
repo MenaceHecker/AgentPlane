@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -265,22 +266,138 @@ func readBounded(r *http.Request, max int64) ([]byte, error) {
 	return b, nil
 }
 
-// decodeRequest parses and validates a body strictly (unknown fields, trailing
-// data and out-of-range values are errors).
+// decodeRequest parses a body strictly and checks it against the contract's
+// request schema BEFORE any value is coerced. A Go struct cannot tell a missing
+// field from a zero value or a JSON null from an omitted field, so the body is
+// first read as an object of raw members and each member is decoded with its
+// exact type: required members must be present, nothing may be null (the
+// schema declares no nullable request field), unknown members are rejected,
+// and only then are ranges checked. A valid empty content string and omitted
+// optional fields are preserved.
 func decodeRequest(body []byte) (*ChatRequest, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	var req ChatRequest
-	if err := dec.Decode(&req); err != nil {
+	var members map[string]json.RawMessage
+	if err := dec.Decode(&members); err != nil {
 		return nil, fmt.Errorf("invalid JSON request: %v", err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("invalid JSON request: unexpected data after the JSON object")
 	}
+	if members == nil { // the literal null decodes into a nil map
+		return nil, errors.New("invalid JSON request: the request must be a JSON object, not null")
+	}
+	keys := make([]string, 0, len(members))
+	for k := range members {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // deterministic error messages
+	var req ChatRequest
+	for _, k := range keys {
+		raw := members[k]
+		var err error
+		switch k {
+		case "model":
+			err = decodeMember(raw, &req.Model, "model")
+		case "messages":
+			err = decodeMessages(raw, &req.Messages)
+		case "max_tokens":
+			var n int64
+			if err = decodeMember(raw, &n, "max_tokens"); err == nil {
+				req.MaxTokens = &n
+			}
+		case "temperature":
+			var f float64
+			if err = decodeMember(raw, &f, "temperature"); err == nil {
+				req.Temperature = &f
+			}
+		case "top_p":
+			var f float64
+			if err = decodeMember(raw, &f, "top_p"); err == nil {
+				req.TopP = &f
+			}
+		case "stop":
+			err = decodeMember(raw, &req.Stop, "stop")
+			if err == nil && req.Stop == nil {
+				req.Stop = []string{}
+			}
+		case "stream":
+			err = decodeMember(raw, &req.Stream, "stream")
+		default:
+			err = fmt.Errorf("unknown field %q", k)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid JSON request: %v", err)
+		}
+	}
+	for _, required := range []string{"model", "messages"} {
+		if _, ok := members[required]; !ok {
+			return nil, fmt.Errorf("invalid JSON request: %s is required", required)
+		}
+	}
 	if err := req.validate(); err != nil {
 		return nil, err
 	}
 	return &req, nil
+}
+
+// decodeMember decodes one member into dst with its exact type. A JSON null is
+// an error: no request field is nullable in the contract.
+func decodeMember(raw json.RawMessage, dst any, name string) error {
+	if isNull(raw) {
+		return fmt.Errorf("%s must not be null", name)
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		return fmt.Errorf("%s has the wrong type or value: %v", name, err)
+	}
+	return nil
+}
+
+func isNull(raw json.RawMessage) bool { return string(bytes.TrimSpace(raw)) == "null" }
+
+// decodeMessages decodes the messages array. Every element must be an object
+// with exactly a string role and a string content (an empty string is valid).
+func decodeMessages(raw json.RawMessage, dst *[]Message) error {
+	if isNull(raw) {
+		return errors.New("messages must not be null")
+	}
+	var elems []json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil {
+		return fmt.Errorf("messages must be an array: %v", err)
+	}
+	msgs := make([]Message, 0, len(elems))
+	for i, el := range elems {
+		if isNull(el) {
+			return fmt.Errorf("messages[%d] must not be null", i)
+		}
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(el, &members); err != nil {
+			return fmt.Errorf("messages[%d] must be an object: %v", i, err)
+		}
+		var m Message
+		for _, k := range []string{"role", "content"} {
+			v, ok := members[k]
+			if !ok {
+				return fmt.Errorf("messages[%d].%s is required", i, k)
+			}
+			target := &m.Content
+			if k == "role" {
+				target = &m.Role
+			}
+			if err := decodeMember(v, target, fmt.Sprintf("messages[%d].%s", i, k)); err != nil {
+				return err
+			}
+		}
+		if len(members) != 2 {
+			for k := range members {
+				if k != "role" && k != "content" {
+					return fmt.Errorf("messages[%d] has an unknown field %q", i, k)
+				}
+			}
+		}
+		msgs = append(msgs, m)
+	}
+	*dst = msgs
+	return nil
 }
 
 func (r *ChatRequest) validate() error {
