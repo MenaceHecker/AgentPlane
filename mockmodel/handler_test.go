@@ -345,14 +345,17 @@ func TestContractFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if bytes.Contains(body, []byte(`"stream": true`)) {
-				t.Skip("streaming fixtures are exercised once streaming is implemented")
-			}
 			rec := do(t, h, http.MethodPost, ChatPath, string(body))
 			if f.Valid {
 				valid++
 				if rec.Code != http.StatusOK {
 					t.Fatalf("a contract-valid request was refused: %d %s", rec.Code, rec.Body.String())
+				}
+				if bytes.Contains(body, []byte(`"stream": true`)) {
+					if err := checkStreamBody(t, doc, rec.Body.String()); err != nil {
+						t.Fatalf("stream does not satisfy the contract: %v\n%s", err, rec.Body.String())
+					}
+					return
 				}
 				if err := validateSchema(t, doc, "ChatCompletionResponse", rec.Body.Bytes()); err != nil {
 					t.Fatalf("response does not satisfy ChatCompletionResponse: %v\n%s", err, rec.Body.String())
@@ -368,7 +371,7 @@ func TestContractFixtures(t *testing.T) {
 			}
 		})
 	}
-	if valid < 3 || invalid < 10 {
+	if valid < 4 || invalid < 10 {
 		t.Fatalf("fixture replay covered %d valid and %d invalid requests; the manifest changed or the filter is wrong", valid, invalid)
 	}
 }

@@ -169,9 +169,13 @@ func writeError(w http.ResponseWriter, status int, code, message, id string) {
 
 // requestKey is the deterministic identity of a request: SHA-256 over the seed
 // and the canonical re-encoding of the parsed request, so whitespace and key
-// order in the incoming JSON do not matter.
+// order in the incoming JSON do not matter. The stream flag is deliberately
+// NOT part of the identity: a request and its streamed twin must produce the
+// same id, content and usage, only delivered differently.
 func (s *Server) requestKey(req *ChatRequest) [32]byte {
-	canon, _ := json.Marshal(req)
+	identity := *req
+	identity.Stream = false
+	canon, _ := json.Marshal(&identity)
 	var seed [8]byte
 	binary.BigEndian.PutUint64(seed[:], uint64(s.cfg.Seed))
 	h := sha256.New()
@@ -218,10 +222,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		fail(err.Error())
 		return
 	}
-	if req.Stream {
-		fail("streaming is not available in this build")
-		return
-	}
 	key := s.requestKey(req)
 	// Simulated processing time. A cancelled request (the client went away)
 	// is abandoned without writing anything.
@@ -233,6 +233,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if s.shouldFail(key) {
 		writeError(w, http.StatusInternalServerError, "internal_error",
 			"simulated failure (deterministic for this seed and request)", idFromKey(key))
+		return
+	}
+	if req.Stream {
+		s.streamResponse(w, r, req, key)
 		return
 	}
 	resp := s.buildResponse(req, key)
