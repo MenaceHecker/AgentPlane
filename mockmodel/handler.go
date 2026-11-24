@@ -33,48 +33,12 @@ const (
 	// ReadyPath answers 200 once the server is serving.
 	ReadyPath = "/readyz"
 
-	// DefaultListen binds loopback only. Exposing the mock on another
-	// interface is an explicit choice (the --listen flag).
-	DefaultListen = "127.0.0.1:8081"
-	// DefaultMaxBodyBytes bounds the request body.
-	DefaultMaxBodyBytes int64 = 1 << 20
-	// DefaultCompletionTokens is the simulated completion length.
-	DefaultCompletionTokens = 16
-
 	// maxSafeInteger is 2^53-1, the integer range of the gateway contract.
 	maxSafeInteger int64 = 9007199254740991
 	// fixedCreated is the constant "created" timestamp: deterministic output
 	// must not depend on the wall clock.
 	fixedCreated int64 = 1700000000
 )
-
-// Config holds the mock's behavior. The zero value is not valid; start from
-// DefaultConfig.
-type Config struct {
-	// Listen is the address the server binds.
-	Listen string
-	// MaxBodyBytes bounds a request body.
-	MaxBodyBytes int64
-	// Seed makes responses differ between deployments while staying
-	// deterministic for one seed.
-	Seed int64
-	// PromptTokens is the simulated prompt token count. Zero means derive a
-	// simulated count from the request (whitespace-separated words).
-	PromptTokens int64
-	// CompletionTokens is the simulated completion length, capped by the
-	// request's max_tokens.
-	CompletionTokens int64
-}
-
-// DefaultConfig returns the loopback-only default configuration.
-func DefaultConfig() Config {
-	return Config{
-		Listen:           DefaultListen,
-		MaxBodyBytes:     DefaultMaxBodyBytes,
-		Seed:             1,
-		CompletionTokens: DefaultCompletionTokens,
-	}
-}
 
 // Message is one chat message.
 type Message struct {
@@ -127,18 +91,41 @@ type errorResponse struct {
 	Error errorBody `json:"error"`
 }
 
+// WaitFunc waits for d or until ctx is done, returning ctx's error in the
+// latter case. It is injected so tests never sleep for real.
+type WaitFunc func(ctx context.Context, d time.Duration) error
+
 // Option customizes a handler (used by tests).
 type Option func(*Server)
 
+// WithWait replaces the function that simulates latency.
+func WithWait(w WaitFunc) Option { return func(s *Server) { s.wait = w } }
+
 // Server is the mock's HTTP handler.
 type Server struct {
-	cfg Config
-	mux *http.ServeMux
+	cfg  Config
+	mux  *http.ServeMux
+	wait WaitFunc
+}
+
+// RealWait is the default WaitFunc: a timer that respects cancellation.
+func RealWait(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // NewHandler returns the mock's http.Handler.
 func NewHandler(cfg Config, opts ...Option) http.Handler {
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), wait: RealWait}
 	for _, o := range opts {
 		o(s)
 	}
@@ -196,6 +183,20 @@ func (s *Server) requestKey(req *ChatRequest) [32]byte {
 	return out
 }
 
+// failureScore maps a request key to [0, 1). A request fails when its score is
+// below the configured error rate. It is a pure function of seed and request:
+// no shared random generator, so arrival order and concurrency cannot change
+// which requests fail, and a request that fails at one rate fails at every
+// higher rate.
+func failureScore(key [32]byte) float64 {
+	sum := sha256.Sum256(append([]byte("agentplane-mockmodel-failure\x00"), key[:]...))
+	return float64(binary.BigEndian.Uint64(sum[:8])>>11) / float64(1<<53)
+}
+
+func (s *Server) shouldFail(key [32]byte) bool {
+	return s.cfg.ErrorRate > 0 && failureScore(key) < s.cfg.ErrorRate
+}
+
 func idFromKey(key [32]byte) string { return "chatcmpl-" + hex.EncodeToString(key[:8]) }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +223,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := s.requestKey(req)
+	// Simulated processing time. A cancelled request (the client went away)
+	// is abandoned without writing anything.
+	if s.cfg.Latency > 0 {
+		if err := s.wait(r.Context(), s.cfg.Latency); err != nil {
+			return
+		}
+	}
+	if s.shouldFail(key) {
+		writeError(w, http.StatusInternalServerError, "internal_error",
+			"simulated failure (deterministic for this seed and request)", idFromKey(key))
+		return
+	}
 	resp := s.buildResponse(req, key)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", resp.ID)

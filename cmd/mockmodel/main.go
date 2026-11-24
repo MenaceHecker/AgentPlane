@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -14,7 +16,14 @@ import (
 )
 
 func main() {
-	cfg := mockmodel.DefaultConfig()
+	cfg, err := mockmodel.ParseFlags(os.Args[1:], os.Stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "mockmodel: %v\n", err)
+		os.Exit(2)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, cfg); err != nil {
