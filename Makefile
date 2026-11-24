@@ -63,6 +63,14 @@ test: ## Run Go unit tests with the race detector
 secrets: ## Scan tracked working-tree files with gitleaks (redacted output)
 	@scripts/scan-secrets.sh
 
+.PHONY: mock-run
+mock-run: ## Run the deterministic mock model on loopback (Ctrl-C to stop; MOCK_ARGS for flags)
+	@go run ./cmd/mockmodel $(MOCK_ARGS)
+
+.PHONY: mock-smoke
+mock-smoke: ## Start a disposable mock model, check determinism and streaming, stop it (needs go, curl, python3)
+	@scripts/mock-smoke.sh
+
 .PHONY: secrets-history
 secrets-history: ## Scan every line ever added to go.sum (gitleaks' default history scan skips go.sum)
 	@scripts/scan-secrets.sh --go-sum-history

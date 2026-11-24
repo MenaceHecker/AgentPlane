@@ -68,6 +68,10 @@ jobs:
       # Prints "NOT APPLICABLE: Go module not introduced (P0-T3)" until go.mod exists.
       - name: make test
         run: make test
+      # Starts a disposable mock model on a loopback port and checks it
+      # end to end (determinism, streaming, validation, failures, shutdown).
+      - name: make mock-smoke
+        run: make mock-smoke
 
   contracts:
     name: contracts
