@@ -86,6 +86,17 @@ func (c Config) Validate() error {
 	if c.CompletionTokens < 0 || c.CompletionTokens > MaxCompletionTokens {
 		errs = append(errs, fmt.Errorf("completion-tokens %d must be between 0 and %d", c.CompletionTokens, MaxCompletionTokens))
 	}
+	// The contract caps every token count, total_tokens included, at 2^53-1.
+	// Each value is valid alone, but the response reports their exact sum, so
+	// an accepted pair must not add up past the limit. (A derived prompt count,
+	// PromptTokens == 0, is a word count of a request body of at most
+	// maxBodyLimit bytes, far below the limit.) max_tokens only lowers the
+	// completion, so the configured sum is the worst case.
+	if c.PromptTokens >= 0 && c.PromptTokens <= maxSafeInteger && c.CompletionTokens >= 0 && c.CompletionTokens <= MaxCompletionTokens &&
+		c.PromptTokens > maxSafeInteger-c.CompletionTokens {
+		errs = append(errs, fmt.Errorf("prompt-tokens %d plus completion-tokens %d exceeds %d, the largest total_tokens the contract allows",
+			c.PromptTokens, c.CompletionTokens, maxSafeInteger))
+	}
 	if c.Latency < 0 || c.Latency > MaxLatency {
 		errs = append(errs, fmt.Errorf("latency %s must be between 0 and %s", c.Latency, MaxLatency))
 	}
