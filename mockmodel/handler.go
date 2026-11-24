@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -401,7 +402,9 @@ func decodeMessages(raw json.RawMessage, dst *[]Message) error {
 }
 
 func (r *ChatRequest) validate() error {
-	if r.Model == "" || len(r.Model) > 128 {
+	// OpenAPI maxLength counts characters (Unicode code points), not UTF-8
+	// bytes: a 128-character name of multibyte characters is valid.
+	if n := utf8.RuneCountInString(r.Model); n < 1 || n > 128 {
 		return errors.New("model is required and at most 128 characters")
 	}
 	if len(r.Messages) == 0 {
