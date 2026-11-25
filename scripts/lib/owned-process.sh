@@ -258,21 +258,34 @@ op_stop_all() {
   return "$rc"
 }
 
-# op_mktemp PREFIX: create the harness directory (sets OP_WORKDIR).
+# op__norm PATH: print PATH with repeated slashes collapsed and trailing slashes dropped
+# (a lone "/" stays). Spaces and every other character are kept as they are.
+op__norm() {
+  local p="$1"
+  while :; do case "$p" in *//*) p="${p//\/\///}" ;; *) break ;; esac; done
+  while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p="${p%/}"; done
+  printf '%s' "$p"
+}
+
+# op_mktemp PREFIX: create the harness directory (sets OP_WORKDIR). The temp root and the
+# created path are normalised the same way once, here, so creation and the later
+# validation in op_remove_workdir can never disagree about spelling.
 op_mktemp() {
-  local root="${TMPDIR:-/tmp}"
-  OP_TMP_ROOT="${root%/}"
+  OP_TMP_ROOT="$(op__norm "${TMPDIR:-/tmp}")"
   OP_TMP_PREFIX="$1"
-  OP_WORKDIR="$(mktemp -d "$OP_TMP_ROOT/$1.XXXXXX")" || return 1
-  OP_WORKDIR="${OP_WORKDIR//\/\///}"
+  local base="${OP_TMP_ROOT%/}" made
+  made="$(mktemp -d "$base/$1.XXXXXX")" || return 1
+  OP_WORKDIR="$(op__norm "$made")"
 }
 
 # op_remove_workdir: remove only the directory op_mktemp created. Refuses anything
-# else (empty, a symlink, not directly under the temp root, wrong prefix).
+# else (empty, relative, a symlink, a parent reference, not directly under the temp
+# root, wrong prefix, a suffix containing a slash).
 op_remove_workdir() {
-  local d="$OP_WORKDIR" rest
-  [ -n "$d" ] || return 0
-  rest="${d#"$OP_TMP_ROOT/$OP_TMP_PREFIX."}"
+  [ -n "$OP_WORKDIR" ] || return 0
+  local d base rest
+  d="$(op__norm "$OP_WORKDIR")"; base="${OP_TMP_ROOT%/}"
+  rest="${d#"$base/$OP_TMP_PREFIX."}"
   if [ "$rest" = "$d" ] || [ -z "$rest" ] || [ "${rest#*/}" != "$rest" ] || [ "${d#*..}" != "$d" ] || [ -L "$d" ] || [ ! -d "$d" ]; then
     op_log "refusing to remove '$d': it is not a directory this harness created under $OP_TMP_ROOT"
     return 1

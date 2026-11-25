@@ -345,6 +345,36 @@ for weird in "" "$root/optest." "$root/optest.a/b" "$root/optest.x/../y"; do
 done
 OP_WORKDIR=""
 
+# --- TMPDIR spelling (review r1, minor 5): creation and removal must agree whatever the spelling of the root
+saved_tmpdir="${TMPDIR-__unset__}"
+spell_case() { # spell_case LABEL ROOT_DIR SPELLING
+  local label="$1" real="$2" spelling="$3" made
+  mkdir -p "$real"; real="$(printf '%s' "$real" | sed -e 's#//*#/#g')"   # (independent of the library) $fix itself contains a "//" on macOS (TMPDIR ends in a slash)
+  TMPDIR="$spelling"; OP_WORKDIR=""
+  if op_mktemp spelltest && made="$OP_WORKDIR" && [ -d "$made" ] && case "$made" in "$real"/spelltest.*) true ;; *) false ;; esac; then
+    : >"$made/inside"
+    if op_remove_workdir && [ ! -e "$made" ] && [ -z "$OP_WORKDIR" ]; then ok "TMPDIR spelling ($label): created, then removed, its own directory"; else bad "TMPDIR spelling ($label): could not remove its own directory '$made'"; fi
+  else bad "TMPDIR spelling ($label): op_mktemp gave '$OP_WORKDIR' (wanted a directory under '$real')"; fi
+  [ "$saved_tmpdir" = "__unset__" ] && unset TMPDIR || TMPDIR="$saved_tmpdir"
+}
+spell_case "spaces, no slash" "$fix/tmp with space" "$fix/tmp with space"
+spell_case "spaces, one trailing slash" "$fix/tmp with space" "$fix/tmp with space/"
+spell_case "spaces, three trailing slashes" "$fix/tmp with space" "$fix/tmp with space///"
+spell_case "internal double slash and trailing slashes" "$fix/tmp with space" "$fix//tmp with space//"
+spell_case "internal triple slash" "$fix/plain" "$fix///plain"
+# the refusals still hold inside such a root
+TMPDIR="$fix/tmp with space///"; op_mktemp spelltest; weird_root="$OP_WORKDIR"; [ "$saved_tmpdir" = "__unset__" ] && unset TMPDIR || TMPDIR="$saved_tmpdir"
+mkdir -p "$fix/target2"; : >"$fix/target2/keep"; ln -s "$fix/target2" "$fix/tmp with space/spelltest.link"
+OP_WORKDIR="$fix/tmp with space///spelltest.link"
+if ! diag op_remove_workdir && [ -e "$fix/target2/keep" ]; then ok "TMPDIR spelling: a symlink under a spaced, slash-heavy root is still refused and its target is intact"; else bad "symlink followed under a weird root"; fi
+OP_WORKDIR="$fix/tmp with space//spelltest.a/b"
+if ! diag op_remove_workdir; then ok "TMPDIR spelling: a suffix containing a slash is still refused"; else bad "slash suffix accepted"; fi
+OP_WORKDIR="$fix/tmp with space//spelltest.x/../y"
+if ! diag op_remove_workdir; then ok "TMPDIR spelling: a parent reference is still refused"; else bad "parent reference accepted"; fi
+OP_WORKDIR="$fix/tmp with space//elsewhere.zzz"; mkdir -p "$fix/tmp with space/elsewhere.zzz"
+if ! diag op_remove_workdir && [ -d "$fix/tmp with space/elsewhere.zzz" ]; then ok "TMPDIR spelling: a directory with another prefix is still refused"; else bad "wrong-prefix directory removed"; fi
+OP_WORKDIR="$weird_root"; op_remove_workdir >/dev/null 2>&1; OP_WORKDIR=""
+
 # --- the canary is still alive after the harness scenarios too
 if running "$canary" && running "$foreign"; then ok "the unrelated canary survived the harness scenarios as well"; else bad "the canary did not survive"; fi
 
