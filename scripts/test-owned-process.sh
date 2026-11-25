@@ -94,6 +94,18 @@ mark="$(wc -l <"$KILL_LOG" | tr -d ' ')"
 diag op_stop normal; diag op_stop stubborn; diag op_stop early5
 if [ "$(wc -l <"$KILL_LOG" | tr -d ' ')" = "$mark" ]; then ok "stopping already-reaped children again sends no signal"; else bad "a reaped PID was signalled: $(tail -n +$((mark + 1)) "$KILL_LOG")"; fi
 
+# 5b. repeated stops report the recorded result, and an entry that is marked reaped is never signalled even when
+#     its PID now belongs to a live child of ours (the PID-reuse case)
+diag op_stop normal; r1=$?; diag op_stop stubborn; r2=$?
+if [ "$r1" -eq 0 ] && [ "$r2" -eq 1 ] && grep -q 'had already stopped' "$fix/diag.txt"; then ok "a repeated stop returns the recorded result (0 after a clean exit, 1 after a kill) and says so"; else bad "repeated stop results: normal=$r1 stubborn=$r2: $(cat "$fix/diag.txt")"; fi
+start_child reused term0
+reused_pid="$(op_pid reused)"; idx="$(op__index reused)"
+OP_REAPED[$idx]=1; OP_RESULT[$idx]=0   # pretend it was reaped while its PID is in fact a live child
+mark="$(wc -l <"$KILL_LOG" | tr -d ' ')"
+diag op_stop reused; r3=$?
+if [ "$r3" -eq 0 ] && [ "$(wc -l <"$KILL_LOG" | tr -d ' ')" = "$mark" ] && op__running "$reused_pid"; then ok "an entry marked reaped is never signalled, even if its PID is now a live process of ours"; else bad "a reaped entry's PID was signalled (rc=$r3)"; fi
+OP_REAPED[$idx]=""; op_stop reused 2>/dev/null   # really stop it now
+
 # 6. only TERM/KILL to positive single PIDs: no group, no name, no probe of a reaped PID
 if ! grep -Evq '^-(TERM|KILL) [0-9]+$' "$KILL_LOG" || [ ! -s "$KILL_LOG" ]; then
   [ -s "$KILL_LOG" ] && ok "every signal sent was -TERM or -KILL to one positive PID (never a group)" || bad "no signals were recorded"
@@ -194,6 +206,9 @@ ln -s "$fix/target" "$root/optest.link$$"
 OP_WORKDIR="$root/optest.link$$"
 if ! diag op_remove_workdir && [ -e "$fix/target/keep" ]; then ok "a symlink with the right name is refused and its target is intact"; else bad "a symlink was followed"; fi
 rm -f "$root/optest.link$$"
+mkdir -p "$fix/cwd/optest.relative"; : >"$fix/cwd/optest.relative/keep"
+OP_WORKDIR="optest.relative"
+if ! (cd "$fix/cwd" && diag op_remove_workdir) && [ -e "$fix/cwd/optest.relative/keep" ]; then ok "a relative directory name with no slash is refused and left intact"; else bad "a relative directory was removed"; fi
 for weird in "" "$root/optest." "$root/optest.a/b" "$root/optest.x/../y"; do
   OP_WORKDIR="$weird"
   if [ -z "$weird" ]; then diag op_remove_workdir || { bad "an empty OP_WORKDIR is a no-op, not an error"; continue; }; ok "an empty OP_WORKDIR removes nothing"; continue; fi
