@@ -23,8 +23,11 @@ go build -o "$fix/kindshape" ./cmd/kindshape || { echo "cannot build kindshape" 
 if "$fix/kindshape" check-config --config deploy/kind/config.yaml >/dev/null 2>&1; then ok "kindshape accepts the committed config"; else bad "kindshape rejected the committed config"; fi
 "$fix/kindshape" check-nodes --config deploy/kind/config.yaml </dev/null >/dev/null 2>"$fix/e"; rc=$?
 if [ "$rc" -eq 2 ]; then ok "kindshape refuses empty input (status 2), never treating it as compatible"; else bad "kindshape on empty input exited $rc, want 2"; fi
-echo '{"kind":"List"}' | "$fix/kindshape" check-nodes --config deploy/kind/config.yaml >/dev/null 2>&1; rc=$?
-if [ "$rc" -eq 2 ]; then ok "kindshape refuses a non-NodeList document (status 2)"; else bad "kindshape on a non-NodeList exited $rc, want 2"; fi
+echo '{"kind":"Pod"}' | "$fix/kindshape" check-nodes --config deploy/kind/config.yaml >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 2 ]; then ok "kindshape refuses a document that is not a node list (status 2)"; else bad "kindshape on a Pod exited $rc, want 2"; fi
+echo '{"apiVersion":"v1","kind":"List","items":[]}' | "$fix/kindshape" check-nodes --config deploy/kind/config.yaml >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 1 ]; then ok "kindshape reports an empty node list as incompatible (status 1), never compatible"; else bad "kindshape on an empty List exited $rc, want 1"; fi
+if "$fix/kindshape" check-nodes --config deploy/kind/config.yaml <internal/kindshape/testdata/kubectl-get-nodes.json >/dev/null 2>&1; then ok "kindshape accepts the committed real kubectl get nodes -o json fixture (kind List)"; else bad "kindshape rejected the real-output fixture"; fi
 
 # --- stub tools
 mkdir -p "$fix/bin" "$fix/st"
@@ -89,7 +92,7 @@ cp = node("c-control-plane", "v1.35.0", {"node-role.kubernetes.io/control-plane"
 sysw = node("c-worker", "v1.35.0", {"agentplane.io/pool": "system"})
 ten = node("c-worker2", "v1.35.0", {"agentplane.io/pool": "tenant"},
            [{"key": "agentplane.io/pool", "value": "tenant", "effect": "NoSchedule"}])
-def w(n, items): json.dump({"apiVersion": "v1", "kind": "NodeList", "items": items}, open("%s/nodes-%s.json" % (d, n), "w"))
+def w(n, items): json.dump({"apiVersion": "v1", "kind": "List", "items": items}, open("%s/nodes-%s.json" % (d, n), "w"))
 w("good", [cp, sysw, ten])
 w("single", [cp])                                     # a default one-node kind cluster
 tn = json.loads(json.dumps(ten)); tn["spec"]["taints"] = []

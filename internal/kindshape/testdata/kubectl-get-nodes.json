@@ -1,0 +1,89 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {
+        "name": "c-control-plane",
+        "labels": {
+          "kubernetes.io/arch": "arm64",
+          "kubernetes.io/hostname": "c-control-plane",
+          "kubernetes.io/os": "linux",
+          "node-role.kubernetes.io/control-plane": ""
+        }
+      },
+      "spec": {
+        "taints": [
+          {
+            "effect": "NoSchedule",
+            "key": "node-role.kubernetes.io/control-plane"
+          }
+        ]
+      },
+      "status": {
+        "nodeInfo": {
+          "kubeletVersion": "v1.35.0",
+          "architecture": "arm64",
+          "osImage": "Debian GNU/Linux 12 (bookworm)"
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {
+        "name": "c-worker",
+        "labels": {
+          "agentplane.io/pool": "system",
+          "kubernetes.io/arch": "arm64",
+          "kubernetes.io/hostname": "c-worker",
+          "kubernetes.io/os": "linux"
+        }
+      },
+      "spec": {
+        "taints": []
+      },
+      "status": {
+        "nodeInfo": {
+          "kubeletVersion": "v1.35.0",
+          "architecture": "arm64",
+          "osImage": "Debian GNU/Linux 12 (bookworm)"
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {
+        "name": "c-worker2",
+        "labels": {
+          "agentplane.io/pool": "tenant",
+          "kubernetes.io/arch": "arm64",
+          "kubernetes.io/hostname": "c-worker2",
+          "kubernetes.io/os": "linux"
+        }
+      },
+      "spec": {
+        "taints": [
+          {
+            "effect": "NoSchedule",
+            "key": "agentplane.io/pool",
+            "value": "tenant"
+          }
+        ]
+      },
+      "status": {
+        "nodeInfo": {
+          "kubeletVersion": "v1.35.0",
+          "architecture": "arm64",
+          "osImage": "Debian GNU/Linux 12 (bookworm)"
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "resourceVersion": ""
+  }
+}

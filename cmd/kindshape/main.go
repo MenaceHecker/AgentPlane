@@ -52,9 +52,17 @@ func run(args []string, in io.Reader, out, errw io.Writer) int {
 		return 2
 	}
 	var list corev1.NodeList
-	if err := json.Unmarshal(raw, &list); err != nil || list.Kind != "NodeList" {
-		_, _ = fmt.Fprintf(errw, "kindshape: stdin is not a kubectl NodeList (%v)\n", err)
+	// `kubectl get nodes -o json` prints kind "List" (a NodeList carries
+	// "NodeList"); every item must be a Node.
+	if err := json.Unmarshal(raw, &list); err != nil || (list.Kind != "List" && list.Kind != "NodeList") {
+		_, _ = fmt.Fprintf(errw, "kindshape: stdin is not a kubectl node list (kind %q, error %v)\n", list.Kind, err)
 		return 2
+	}
+	for i, n := range list.Items {
+		if n.Kind != "Node" {
+			_, _ = fmt.Fprintf(errw, "kindshape: item %d is kind %q, not Node\n", i, n.Kind)
+			return 2
+		}
 	}
 	if problems := kindshape.CheckNodes(exp, list.Items); len(problems) > 0 {
 		for _, p := range problems {
