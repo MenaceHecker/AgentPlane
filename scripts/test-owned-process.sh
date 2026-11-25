@@ -367,10 +367,15 @@ TMPDIR="$fix/tmp with space///"; op_mktemp spelltest; weird_root="$OP_WORKDIR"; 
 mkdir -p "$fix/target2"; : >"$fix/target2/keep"; ln -s "$fix/target2" "$fix/tmp with space/spelltest.link"
 OP_WORKDIR="$fix/tmp with space///spelltest.link"
 if ! diag op_remove_workdir && [ -e "$fix/target2/keep" ]; then ok "TMPDIR spelling: a symlink under a spaced, slash-heavy root is still refused and its target is intact"; else bad "symlink followed under a weird root"; fi
+# these directories REALLY EXIST, so only the library's own checks (not "no such directory") can refuse them
+mkdir -p "$fix/tmp with space/spelltest.a/b" "$fix/tmp with space/spelltest..x"; : >"$fix/tmp with space/spelltest.a/b/keep"; : >"$fix/tmp with space/spelltest..x/keep"
 OP_WORKDIR="$fix/tmp with space//spelltest.a/b"
-if ! diag op_remove_workdir; then ok "TMPDIR spelling: a suffix containing a slash is still refused"; else bad "slash suffix accepted"; fi
-OP_WORKDIR="$fix/tmp with space//spelltest.x/../y"
-if ! diag op_remove_workdir; then ok "TMPDIR spelling: a parent reference is still refused"; else bad "parent reference accepted"; fi
+if ! diag op_remove_workdir && [ -e "$fix/tmp with space/spelltest.a/b/keep" ]; then ok "TMPDIR spelling: an existing directory whose suffix contains a slash is still refused and intact"; else bad "slash suffix accepted"; fi
+OP_WORKDIR="$fix/tmp with space//spelltest..x"
+if ! diag op_remove_workdir && [ -e "$fix/tmp with space/spelltest..x/keep" ]; then ok "TMPDIR spelling: an existing directory whose name holds a parent reference is still refused and intact"; else bad "parent reference accepted"; fi
+mkdir -p "$fix/tmp with space/spelltest.real"; : >"$fix/tmp with space/spelltest.real/keep"
+OP_WORKDIR="$fix/tmp with space//spelltest.x/../spelltest.real"
+if ! diag op_remove_workdir && [ -e "$fix/tmp with space/spelltest.real/keep" ]; then ok "TMPDIR spelling: a path that reaches an existing workdir through a parent reference is refused and intact"; else bad "parent-reference path accepted"; fi
 OP_WORKDIR="$fix/tmp with space//elsewhere.zzz"; mkdir -p "$fix/tmp with space/elsewhere.zzz"
 if ! diag op_remove_workdir && [ -d "$fix/tmp with space/elsewhere.zzz" ]; then ok "TMPDIR spelling: a directory with another prefix is still refused"; else bad "wrong-prefix directory removed"; fi
 OP_WORKDIR="$weird_root"; op_remove_workdir >/dev/null 2>&1; OP_WORKDIR=""
