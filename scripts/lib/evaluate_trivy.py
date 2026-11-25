@@ -77,6 +77,13 @@ def evaluate(doc, want_version):
             need(v.get("Severity") in SEVERITIES, "%s has severity %r" % (where, v.get("Severity")))
             fixed = v.get("FixedVersion", "")
             need(isinstance(fixed, str), where + ".FixedVersion is not a string")
+            status = v.get("Status", "")
+            need(isinstance(status, str), where + ".Status is not a string")
+            # A finding that says it is fixed but names no fixed version is contradictory scan
+            # metadata. Counting it as "unfixed" would let a fixable HIGH or CRITICAL pass, so it
+            # is not valid evidence. (Other statuses, such as will_not_fix and end_of_life, keep
+            # the field-based rule: a non-empty FixedVersion is fixable, an empty one is unfixed.)
+            need(not (status == "fixed" and not fixed.strip()), "%s (%s) has Status 'fixed' but no FixedVersion: contradictory scan metadata" % (where, v["VulnerabilityID"]))
             findings.append({
                 "id": v["VulnerabilityID"], "pkg": v["PkgName"], "installed": v["InstalledVersion"],
                 "fixed": fixed, "severity": v["Severity"], "status": v.get("Status", ""), "target": res["Target"],

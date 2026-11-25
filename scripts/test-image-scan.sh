@@ -54,6 +54,20 @@ b = report([vuln("CVE-1", "SEVERE", "1")]); w("bad-severity", b)
 b = report([vuln("CVE-1", "HIGH", "1")]); del b["Results"][1]["Vulnerabilities"][0]["VulnerabilityID"]; w("no-id", b)
 b = report([vuln("CVE-1", "HIGH", "1")]); b["Results"][1]["Vulnerabilities"][0]["FixedVersion"] = 5; w("fixed-not-string", b)
 b = report(); b["Results"][1]["Vulnerabilities"] = "none"; w("vulns-not-list", b)
+def vs(id, sev, status, fixed=None):
+    v = {"VulnerabilityID": id, "PkgName": "stdlib", "InstalledVersion": "v1.27.3", "Severity": sev, "Status": status}
+    if fixed is not None: v["FixedVersion"] = fixed
+    return v
+w("fixed-status-empty-version-high", report([vs("CVE-20", "HIGH", "fixed", "")]))
+w("fixed-status-no-version-critical", report([vs("CVE-21", "CRITICAL", "fixed")]))
+w("fixed-status-no-version-medium", report([vs("CVE-22", "MEDIUM", "fixed")]))
+w("fixed-status-blank-version-high", report([vs("CVE-23", "HIGH", "fixed", "  ")]))
+w("will-not-fix-with-version-high", report([vs("CVE-24", "HIGH", "will_not_fix", "9.9")]))
+w("end-of-life-with-version-critical", report([vs("CVE-25", "CRITICAL", "end_of_life", "9.9")]))
+w("will-not-fix-no-version-high", report([vs("CVE-26", "HIGH", "will_not_fix")]))
+w("affected-blank-version-high", report([vs("CVE-27", "HIGH", "affected", "  ")]))
+w("fixed-status-with-version-high", report([vs("CVE-28", "HIGH", "fixed", "9.9")]))
+b = report([vs("CVE-29", "HIGH", "affected")]); b["Results"][1]["Vulnerabilities"][0]["Status"] = 7; w("status-not-string", b)
 open(d + "/r/empty.json", "w").close()
 open(d + "/r/garbage.json", "w").write("{not json")
 open(d + "/r/array.json", "w").write("[]")
@@ -76,6 +90,17 @@ expect "a fixable MEDIUM finding passes and is listed"         fixable-medium 0 
 expect "unfixed HIGH plus lower fixable findings pass, all listed" mixed-passes 0 "finding UNKNOWN  CVE-9"
 expect "an unfixed HIGH does not hide a fixable CRITICAL"      mixed-fails 1 "GATE FAILED"
 expect "a report with only an OS target and no findings passes" os-pkgs-only 0 "GATE PASSED"
+# metadata consistency: Status "fixed" must come with a FixedVersion; the field-based gate is otherwise unchanged
+expect "Status fixed with an empty FixedVersion (HIGH) is invalid, not unfixed"      fixed-status-empty-version-high 2 "contradictory scan metadata"
+expect "Status fixed with no FixedVersion (CRITICAL) is invalid, not unfixed"        fixed-status-no-version-critical 2 "Status 'fixed' but no FixedVersion"
+expect "Status fixed with no FixedVersion (MEDIUM) is invalid as well"               fixed-status-no-version-medium 2 "contradictory scan metadata"
+expect "Status fixed with a blank FixedVersion is invalid"                           fixed-status-blank-version-high 2 "contradictory scan metadata"
+expect "Status fixed with a FixedVersion (HIGH) still fails the gate"                fixed-status-with-version-high 1 "GATE FAILED"
+expect "will_not_fix with a FixedVersion (HIGH) is fixable and fails the gate"       will-not-fix-with-version-high 1 "GATE FAILED"
+expect "end_of_life with a FixedVersion (CRITICAL) is fixable and fails the gate"    end-of-life-with-version-critical 1 "GATE FAILED"
+expect "will_not_fix without a FixedVersion (HIGH) is unfixed: passes with the limitation" will-not-fix-no-version-high 0 "LIMITATION: 1 unfixed"
+expect "a blank FixedVersion with Status affected is treated as fixable (conservative)"   affected-blank-version-high 1 "GATE FAILED"
+expect "a non-string Status is invalid"                                              status-not-string 2 "Status is not a string"
 # --- evaluator: anything that is not valid evidence is status 2, never a pass
 expect "an empty file is invalid"                              empty 2 "empty"
 expect "non-JSON is invalid"                                   garbage 2 "not valid JSON"
