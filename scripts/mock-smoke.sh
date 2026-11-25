@@ -7,8 +7,11 @@
 # streaming response is well framed (data events, one terminal usage chunk with
 # empty choices, [DONE]) and agrees with the non-streaming response, bad input is
 # a 400, and a server started with --error-rate=1 fails deterministically. It
-# stops ONLY the processes it started (by their own PIDs) and verifies they are
-# gone. It needs go, curl and python3 and contacts nothing but 127.0.0.1.
+# stops ONLY the processes it started (registered owned children, see
+# scripts/lib/owned-process.sh): graceful SIGTERM with a bounded wait, a bounded
+# escalation for that same child, no signal to anything else, and a cleanup of
+# only its own temp directory on every exit path (normal, failure, INT, TERM).
+# It needs go, curl and python3 and contacts nothing but 127.0.0.1.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -17,26 +20,11 @@ for tool in go curl python3; do
   command -v "$tool" >/dev/null 2>&1 || { echo "ERROR: $tool not found." >&2; exit 1; }
 done
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/mock-smoke.XXXXXX")"
-pids=()
-
-# stop_own PID: terminate one process we started and wait for it.
-stop_own() {
-  local pid="$1"
-  if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
-  fi
-}
-
-cleanup() {
-  local pid
-  for pid in ${pids[@]+"${pids[@]}"}; do stop_own "$pid"; done
-  case "$work" in
-    "${TMPDIR:-/tmp}"/mock-smoke.*) rm -rf -- "$work" ;;
-  esac
-}
-trap cleanup EXIT
+# shellcheck source=lib/owned-process.sh
+. scripts/lib/owned-process.sh
+op_mktemp mock-smoke || { echo "ERROR: cannot create the temp directory." >&2; exit 1; }
+work="$OP_WORKDIR"
+op_install_traps
 
 fail() { echo "mock-smoke: FAIL: $*" >&2; exit 1; }
 
@@ -48,11 +36,11 @@ start_server() {
   local name="$1"; shift
   "$work/mockmodel" --listen 127.0.0.1:0 "$@" >"$work/$name.out" 2>"$work/$name.err" &
   PID=$!
-  pids+=("$PID")
+  op_register "$name" "$PID" || fail "cannot register $name"
   local i
   ADDR=""
   for i in $(seq 1 150); do # up to ~15 s for the address line
-    kill -0 "$PID" 2>/dev/null || fail "$name exited early: $(cat "$work/$name.err")"
+    op_alive "$name" || fail "$name exited early: $(cat "$work/$name.err")"
     ADDR="$(sed -n 's/^mockmodel listening on //p' "$work/$name.out" | head -1)"
     [ -n "$ADDR" ] && break
     sleep 0.1
@@ -127,16 +115,14 @@ code="$(post "$FAIL_ADDR" "$REQ" "$work/fail.json")"
 grep -q '"code":"internal_error"' "$work/fail.json" || fail "simulated failure lacks the internal_error envelope"
 echo "mock-smoke: --error-rate=1 fails deterministically with 500"
 
-# 5. clean shutdown of exactly the processes we started
-for entry in "main:$MAIN_PID" "failing:$FAIL_PID"; do
-  name="${entry%%:*}"; pid="${entry##*:}"
-  kill -TERM "$pid"
-  status=0
-  wait "$pid" || status=$?
-  [ "$status" -eq 0 ] || fail "$name exited with status $status on SIGTERM, want 0"
-  if kill -0 "$pid" 2>/dev/null; then fail "$name (pid $pid) is still running"; fi
+# 5. clean, bounded shutdown of exactly the processes we started: SIGTERM, at most
+# OWNED_PROCESS_TERM_MS (10 s) of waiting, exit status 0 required; a child that
+# ignores the signal is killed (that child only) and the run FAILS.
+for name in main failing; do
+  pid="$(op_pid "$name")"
+  op_stop "$name" || fail "$name (pid $pid) did not shut down cleanly on SIGTERM (see the diagnostics above)"
+  if op__running "$pid"; then fail "$name (pid $pid) is still running"; fi
 done
-pids=()
 if curl -fsS --max-time 2 "http://$MAIN_ADDR/readyz" >/dev/null 2>&1; then fail "the main server still answers after shutdown"; fi
 echo "mock-smoke: both servers exited 0 on SIGTERM and no owned process survives"
 echo "mock-smoke: OK"

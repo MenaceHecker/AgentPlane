@@ -68,6 +68,11 @@ jobs:
       # Prints "NOT APPLICABLE: Go module not introduced (P0-T3)" until go.mod exists.
       - name: make test
         run: make test
+      # Tests the owned-child helper the smoke harness relies on: bounded
+      # termination, escalation for a TERM-ignoring child, partial-start and
+      # signal cleanup, and that unrelated processes survive.
+      - name: make smoke-cleanup-test
+        run: make smoke-cleanup-test
       # Starts a disposable mock model on a loopback port and checks it
       # end to end (determinism, streaming, validation, failures, shutdown).
       - name: make mock-smoke

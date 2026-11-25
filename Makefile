@@ -71,6 +71,10 @@ mock-run: ## Run the deterministic mock model on loopback (Ctrl-C to stop; MOCK_
 mock-smoke: ## Start a disposable mock model, check determinism and streaming, stop it (needs go, curl, python3)
 	@scripts/mock-smoke.sh
 
+.PHONY: smoke-cleanup-test
+smoke-cleanup-test: ## Test the owned-process helper used by mock-smoke (needs bash and python3)
+	@scripts/test-owned-process.sh
+
 .PHONY: secrets-history
 secrets-history: ## Scan every line ever added to go.sum (gitleaks' default history scan skips go.sum)
 	@scripts/scan-secrets.sh --go-sum-history
