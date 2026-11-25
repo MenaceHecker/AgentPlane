@@ -40,15 +40,22 @@ rand() { ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/nul
 # right in that situation, so the test must not depend on luck: it keeps
 # drawing candidates until gitleaks reports one, and fails loudly if none of 25
 # is reported (then the premise "this line is a secret" is not established).
+# detect_line reads one line on stdin and returns gitleaks' own exit status:
+# 0 = nothing reported, 1 = a finding, anything else = the detector itself failed
+# (bad flags, crash, missing binary). Only 1 may be treated as "detected".
+real_detect() { gitleaks stdin --redact --no-banner --log-level error >/dev/null 2>&1; }
+DETECT=real_detect # the unit tests of the oracle below replace this with a stub
+
 detected_line() {
-  local fn="$1" line i
+  local fn="$1" line i rc
   for i in $(seq 1 25); do
     line="$("$fn")"
-    if printf '%s\n' "$line" | gitleaks stdin --redact --no-banner --log-level error >/dev/null 2>&1; then
-      continue # exit status 0: gitleaks reported nothing, draw again
-    fi
-    printf '%s\n' "$line"
-    return 0
+    rc=0; printf '%s\n' "$line" | "$DETECT" || rc=$?
+    case "$rc" in
+      0) continue ;; # nothing reported: draw again
+      1) printf '%s\n' "$line"; return 0 ;; # a finding
+      *) echo "TEST SETUP ERROR: the detector failed with exit status $rc for $fn" >&2; return 2 ;;
+    esac
   done
   echo "TEST SETUP ERROR: gitleaks reported none of 25 generated candidates for $fn" >&2
   return 1
@@ -89,16 +96,32 @@ expect_detect() { # name dir file-substring
 valid_line()    { printf 'github.com/example/apikey-client v1.2.3 h1:%s=\n' "$(rand 43)"; }
 valid_modline() { printf 'github.com/example/apikey-client v1.2.3/go.mod h1:%s=\n' "$(rand 43)"; }
 
-# --- the generator of test secrets is itself deterministic in outcome
-cand_never() { printf 'nothing = secret-free'; }
-if out="$(detected_line cand_never 2>&1)"; then bad "the oracle accepted a line gitleaks does not report"; \
-elif printf '%s' "$out" | grep -q "reported none of 25"; then ok "the oracle fails loudly when no candidate is a detectable secret"; \
-else bad "the oracle failed for the wrong reason: $out"; fi
-flaky_counter="$work/flaky-count"; : >"$flaky_counter"
-cand_flaky() { echo x >>"$flaky_counter"; if [ "$(wc -l <"$flaky_counter" | tr -d ' ')" -le 3 ]; then printf 'nothing = secret-free'; else cand_own; fi; }
-if line="$(detected_line cand_flaky 2>/dev/null)" && printf '%s\n' "$line" | grep -q 'api_key' && [ "$(wc -l <"$flaky_counter" | tr -d ' ')" -eq 4 ]; then
-  ok "the oracle skips unlucky candidates and returns the first detectable one (4th draw)"
-else bad "the oracle did not skip three undetectable candidates and return the fourth"; fi
+# --- unit tests of the oracle itself. They use a stub detector whose answers are
+# --- fixed in advance, so they involve no randomness and no real gitleaks.
+draws="$work/draws"
+cand_numbered() { echo x >>"$draws"; printf 'candidate-%s' "$(wc -l <"$draws" | tr -d ' ')"; }
+# stub_script "0 0 0 1": answer the Nth call with the Nth status (the last repeats)
+stub_detect() {
+  local n; n="$(wc -l <"$draws" | tr -d ' ')"; cat >/dev/null
+  set -- $STUB_ANSWERS; [ "$n" -gt "$#" ] && n=$#
+  return "${!n}"
+}
+run_oracle() { STUB_ANSWERS="$1"; : >"$draws"; DETECT=stub_detect; out="$(detected_line cand_numbered 2>&1)"; rc=$?; DETECT=real_detect; ndraws="$(wc -l <"$draws" | tr -d ' ')"; }
+
+run_oracle "0"
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "reported none of 25" && [ "$ndraws" -eq 25 ]; then ok "the oracle gives up after 25 undetected candidates"; else bad "oracle with no detections: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "0 0 0 1"
+if [ "$rc" -eq 0 ] && [ "$out" = "candidate-4" ] && [ "$ndraws" -eq 4 ]; then ok "the oracle skips three undetected candidates and returns the fourth (deterministic)"; else bad "oracle with a fourth-draw detection: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "1"
+if [ "$rc" -eq 0 ] && [ "$out" = "candidate-1" ] && [ "$ndraws" -eq 1 ]; then ok "the oracle returns the first candidate when it is detected"; else bad "oracle with a first-draw detection: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "0 2"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "detector failed with exit status 2" && [ "$ndraws" -eq 2 ]; then ok "a detector error is a setup error, never a detection"; else bad "oracle with a detector error: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "126"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "exit status 126"; then ok "a detector that cannot run (exit 126) is a setup error, never a detection"; else bad "oracle with exit 126: rc=$rc out=$out"; fi
+# the real detector must also report 0 for text with no secret and 1 for a known one
+if printf 'nothing = secret-free\n' | real_detect; then ok "the real detector returns 0 for text without a secret"; else bad "the real detector did not return 0 for a clean line"; fi
+rc=0; printf 'x = "%s"\n' "ghp_$(printf 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8')" | real_detect || rc=$?
+if [ "$rc" -eq 1 ]; then ok "the real detector returns exactly 1 for a GitHub-token-shaped secret"; else bad "the real detector returned $rc for a GitHub-token-shaped secret, expected 1"; fi
 
 # --- legitimate checksums are ignored
 d="$(newrepo real-go-sum)";      cp "$repo/go.sum" "$d/go.sum";                         expect_pass "the repository's real go.sum passes"                "$d"
