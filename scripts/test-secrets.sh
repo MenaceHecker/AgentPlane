@@ -29,7 +29,41 @@ trap cleanup EXIT
 
 command -v gitleaks >/dev/null 2>&1 || { echo "ERROR: gitleaks not found; the scanner self-test cannot run." >&2; exit 1; }
 
-rand() { ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1" ); }
+rand() { ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c "$1" ); }
+
+# detected_line CANDIDATE_FN: prints the first candidate line that gitleaks
+# itself reports when scanning that line alone. gitleaks' generic-api-key rule
+# ignores values that contain stopwords (dictionary words and acronyms such as
+# "vpn" or "mkv"), so a random value is occasionally NOT reported: about 1 in
+# 100 alphanumeric samples and 1 in 250 digit-and-consonant samples. That made
+# the detection cases below fail at random in CI. The scanner under test is
+# right in that situation, so the test must not depend on luck: it keeps
+# drawing candidates until gitleaks reports one, and fails loudly if none of 25
+# is reported (then the premise "this line is a secret" is not established).
+# detect_line reads one line on stdin and returns gitleaks' own exit status:
+# 0 = nothing reported, 1 = a finding, anything else = the detector itself failed
+# (bad flags, crash, missing binary). Only 1 may be treated as "detected".
+real_detect() { gitleaks stdin --redact --no-banner --log-level error >/dev/null 2>&1; }
+DETECT=real_detect # the unit tests of the oracle below replace this with a stub
+
+detected_line() {
+  local fn="$1" line i rc
+  for i in $(seq 1 25); do
+    line="$("$fn")"
+    rc=0; printf '%s\n' "$line" | "$DETECT" || rc=$?
+    case "$rc" in
+      0) continue ;; # nothing reported: draw again
+      1) printf '%s\n' "$line"; return 0 ;; # a finding
+      *) echo "TEST SETUP ERROR: the detector failed with exit status $rc for $fn" >&2; return 2 ;;
+    esac
+  done
+  echo "TEST SETUP ERROR: gitleaks reported none of 25 generated candidates for $fn" >&2
+  return 1
+}
+# candidate line shapes used by the cases below
+cand_own()      { printf 'api_key = "%s"' "$(rand 40)"; }
+cand_appended() { printf 'github.com/example/apikey-client v1.2.3 h1:%s= api_key=%s' "$(rand 43)" "$(rand 40)"; }
+cand_modfield() { printf 'api_key=%s v1.2.3 h1:%s=' "$(rand 40)" "$(rand 43)"; }
 
 # newrepo NAME -> creates $work/NAME with the real scanner and config
 newrepo() {
@@ -62,20 +96,47 @@ expect_detect() { # name dir file-substring
 valid_line()    { printf 'github.com/example/apikey-client v1.2.3 h1:%s=\n' "$(rand 43)"; }
 valid_modline() { printf 'github.com/example/apikey-client v1.2.3/go.mod h1:%s=\n' "$(rand 43)"; }
 
+# --- unit tests of the oracle itself. They use a stub detector whose answers are
+# --- fixed in advance, so they involve no randomness and no real gitleaks.
+draws="$work/draws"
+cand_numbered() { echo x >>"$draws"; printf 'candidate-%s' "$(wc -l <"$draws" | tr -d ' ')"; }
+# stub_script "0 0 0 1": answer the Nth call with the Nth status (the last repeats)
+stub_detect() {
+  local n; n="$(wc -l <"$draws" | tr -d ' ')"; cat >/dev/null
+  set -- $STUB_ANSWERS; [ "$n" -gt "$#" ] && n=$#
+  return "${!n}"
+}
+run_oracle() { STUB_ANSWERS="$1"; : >"$draws"; DETECT=stub_detect; out="$(detected_line cand_numbered 2>&1)"; rc=$?; DETECT=real_detect; ndraws="$(wc -l <"$draws" | tr -d ' ')"; }
+
+run_oracle "0"
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "reported none of 25" && [ "$ndraws" -eq 25 ]; then ok "the oracle gives up after 25 undetected candidates"; else bad "oracle with no detections: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "0 0 0 1"
+if [ "$rc" -eq 0 ] && [ "$out" = "candidate-4" ] && [ "$ndraws" -eq 4 ]; then ok "the oracle skips three undetected candidates and returns the fourth (deterministic)"; else bad "oracle with a fourth-draw detection: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "1"
+if [ "$rc" -eq 0 ] && [ "$out" = "candidate-1" ] && [ "$ndraws" -eq 1 ]; then ok "the oracle returns the first candidate when it is detected"; else bad "oracle with a first-draw detection: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "0 2"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "detector failed with exit status 2" && [ "$ndraws" -eq 2 ]; then ok "a detector error is a setup error, never a detection"; else bad "oracle with a detector error: rc=$rc draws=$ndraws out=$out"; fi
+run_oracle "126"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "exit status 126"; then ok "a detector that cannot run (exit 126) is a setup error, never a detection"; else bad "oracle with exit 126: rc=$rc out=$out"; fi
+# the real detector must also report 0 for text with no secret and 1 for a known one
+if printf 'nothing = secret-free\n' | real_detect; then ok "the real detector returns 0 for text without a secret"; else bad "the real detector did not return 0 for a clean line"; fi
+rc=0; printf 'x = "%s"\n' "ghp_$(printf 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8')" | real_detect || rc=$?
+if [ "$rc" -eq 1 ]; then ok "the real detector returns exactly 1 for a GitHub-token-shaped secret"; else bad "the real detector returned $rc for a GitHub-token-shaped secret, expected 1"; fi
+
 # --- legitimate checksums are ignored
 d="$(newrepo real-go-sum)";      cp "$repo/go.sum" "$d/go.sum";                         expect_pass "the repository's real go.sum passes"                "$d"
 d="$(newrepo synthetic-go-sum)"; { valid_line; valid_modline; } >"$d/go.sum";            expect_pass "synthetic checksum-shaped lines in go.sum pass"      "$d"
 
 # --- a generic key inside go.sum is still detected
-d="$(newrepo key-own-line)"; { valid_line; printf 'api_key = "%s"\n' "$(rand 40)"; } >"$d/go.sum"
+d="$(newrepo key-own-line)"; { valid_line; detected_line cand_own; } >"$d/go.sum"
 expect_detect "a generic api_key on its own line in go.sum is detected" "$d" "go.sum"
 secret="$(grep -o 'api_key = "[A-Za-z0-9]*"' "$d/go.sum" | grep -o '"[A-Za-z0-9]*"' | tr -d '"')"
 if grep -q "Finding:" "$work/out" && ! grep -q "$secret" "$work/out"; then ok "findings are printed and the secret in go.sum is redacted"; else bad "finding output missing or the go.sum secret leaked"; fi
 
-d="$(newrepo key-appended)"; printf 'github.com/example/apikey-client v1.2.3 h1:%s= api_key=%s\n' "$(rand 43)" "$(rand 40)" >"$d/go.sum"
+d="$(newrepo key-appended)"; detected_line cand_appended >"$d/go.sum"
 expect_detect "a key appended to a checksum line in go.sum is detected" "$d" "go.sum"
 
-d="$(newrepo key-in-module-field)"; printf 'api_key=%s v1.2.3 h1:%s=\n' "$(rand 40)" "$(rand 43)" >"$d/go.sum"
+d="$(newrepo key-in-module-field)"; detected_line cand_modfield >"$d/go.sum"
 expect_detect "a key used as the module field in go.sum is detected" "$d" "go.sum"
 
 # --- other rules still fire inside go.sum
@@ -83,7 +144,7 @@ d="$(newrepo other-rule-in-go-sum)"; { valid_line; printf 'token = "ghp_%s"\n' "
 expect_detect "a GitHub-token-shaped value in go.sum is detected (other rules intact)" "$d" "go.sum"
 
 # --- the exception is path-limited
-d="$(newrepo key-other-file)"; printf 'api_key = "%s"\n' "$(rand 40)" >"$d/notes.txt"
+d="$(newrepo key-other-file)"; detected_line cand_own >"$d/notes.txt"
 expect_detect "a generic api_key in another file is detected" "$d" "notes.txt"
 secret="$(grep -o '"[A-Za-z0-9]*"' "$d/notes.txt" | tr -d '"')"
 if grep -q "Finding:" "$work/out" && ! grep -q "$secret" "$work/out"; then ok "findings are printed and the secret in an ordinary file is redacted"; else bad "finding output missing or the secret leaked (ordinary file)"; fi
@@ -113,7 +174,7 @@ hist() { ( cd "$1" && bash scripts/scan-secrets.sh --go-sum-history ) >"$work/ou
 d="$(newrepo hist-clean)"; cp "$repo/go.sum" "$d/go.sum"; ( cd "$d" && git add -A && git commit -q -m legit )
 hist "$d"; if [ "$rc" -eq 0 ]; then ok "go.sum history with only checksum lines passes"; else bad "clean go.sum history failed (exit $rc)"; sed 's/^/        /' "$work/out" | head -5; fi
 
-d="$(newrepo hist-removed-key)"; { valid_line; printf 'api_key = "%s"\n' "$(rand 40)"; } >"$d/go.sum"
+d="$(newrepo hist-removed-key)"; { valid_line; detected_line cand_own; } >"$d/go.sum"
 ( cd "$d" && git add -A && git commit -q -m add-key && valid_line >go.sum && git add -A && git commit -q -m remove-key )
 hist "$d"; if [ "$rc" -ne 0 ] && grep -q "SECRET SCAN FAILED: go.sum history" "$work/out"; then ok "a key added to go.sum and later removed is still found in history"; else bad "history scan missed a removed key (exit $rc)"; fi
 ( cd "$d" && bash scripts/scan-secrets.sh ) >"$work/out" 2>&1; rc=$?

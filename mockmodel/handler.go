@@ -1,0 +1,612 @@
+// Package mockmodel is a deterministic, local-only stand-in for a chat model
+// backend. It implements the OpenAI-compatible subset of the AgentPlane
+// gateway contract (docs/gateway/openapi.yaml, POST /v1/chat/completions) so
+// the platform can be developed and tested without any real model provider,
+// credential or network access.
+//
+// Everything it returns is a pure function of the request and the
+// configuration: identical input yields byte-identical output. Token counts
+// are SIMULATED, not measured by any tokenizer. It is not an authenticated or
+// production server: it listens on loopback by default and has no
+// authentication.
+package mockmodel
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+const (
+	// ChatPath is the only model endpoint.
+	ChatPath = "/v1/chat/completions"
+	// ReadyPath answers 200 once the server is serving.
+	ReadyPath = "/readyz"
+
+	// maxSafeInteger is 2^53-1, the integer range of the gateway contract.
+	maxSafeInteger int64 = 9007199254740991
+	// fixedCreated is the constant "created" timestamp: deterministic output
+	// must not depend on the wall clock.
+	fixedCreated int64 = 1700000000
+)
+
+// Message is one chat message.
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// ChatRequest is the supported OpenAI-compatible subset. Unknown fields are
+// rejected, including any identity-like field (tenant, agent, user).
+type ChatRequest struct {
+	Model       string    `json:"model"`
+	Messages    []Message `json:"messages"`
+	MaxTokens   *int64    `json:"max_tokens,omitempty"`
+	Temperature *float64  `json:"temperature,omitempty"`
+	TopP        *float64  `json:"top_p,omitempty"`
+	Stop        []string  `json:"stop,omitempty"`
+	Stream      bool      `json:"stream,omitempty"`
+}
+
+// Usage is simulated token usage.
+type Usage struct {
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+}
+
+type chatChoice struct {
+	Index        int     `json:"index"`
+	Message      Message `json:"message"`
+	FinishReason string  `json:"finish_reason"`
+}
+
+// ChatResponse is the non-streaming response (contract: ChatCompletionResponse).
+type ChatResponse struct {
+	ID      string       `json:"id"`
+	Object  string       `json:"object"`
+	Created int64        `json:"created"`
+	Model   string       `json:"model"`
+	Choices []chatChoice `json:"choices"`
+	Usage   Usage        `json:"usage"`
+}
+
+type errorBody struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	RequestID string `json:"request_id"`
+}
+
+type errorResponse struct {
+	Error errorBody `json:"error"`
+}
+
+// WaitFunc waits for d or until ctx is done, returning ctx's error in the
+// latter case. It is injected so tests never sleep for real.
+type WaitFunc func(ctx context.Context, d time.Duration) error
+
+// Option customizes a handler (used by tests).
+type Option func(*Server)
+
+// WithWait replaces the function that simulates latency.
+func WithWait(w WaitFunc) Option { return func(s *Server) { s.wait = w } }
+
+// Server is the mock's HTTP handler.
+type Server struct {
+	cfg  Config
+	mux  *http.ServeMux
+	wait WaitFunc
+}
+
+// RealWait is the default WaitFunc: a timer that respects cancellation.
+func RealWait(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// NewHandler returns the mock's http.Handler.
+func NewHandler(cfg Config, opts ...Option) http.Handler {
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), wait: RealWait}
+	for _, o := range opts {
+		o(s)
+	}
+	s.mux.HandleFunc(ChatPath, s.handleChat)
+	s.mux.HandleFunc(ReadyPath, s.handleReady)
+	return s
+}
+
+// ServeHTTP implements http.Handler.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+
+func write(w io.Writer, b []byte) { _, _ = w.Write(b) }
+
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, "GET, HEAD")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	write(w, []byte(`{"status":"ok"}`+"\n"))
+}
+
+func methodNotAllowed(w http.ResponseWriter, allow string) {
+	w.Header().Set("Allow", allow)
+	writeError(w, http.StatusMethodNotAllowed, "invalid_request", "method not allowed", fallbackID("method"))
+}
+
+// fallbackID is the request id used when no usable body exists.
+func fallbackID(label string) string {
+	sum := sha256.Sum256([]byte("mockmodel-" + label))
+	return "mock-" + hex.EncodeToString(sum[:8])
+}
+
+func writeError(w http.ResponseWriter, status int, code, message, id string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", id)
+	w.WriteHeader(status)
+	b, _ := json.Marshal(errorResponse{Error: errorBody{Code: code, Message: message, RequestID: id}})
+	write(w, append(b, '\n'))
+}
+
+// requestKey is the deterministic identity of a request: SHA-256 over the seed
+// and the canonical re-encoding of the parsed request, so whitespace and key
+// order in the incoming JSON do not matter. The stream flag is deliberately
+// NOT part of the identity: a request and its streamed twin must produce the
+// same id, content and usage, only delivered differently.
+func (s *Server) requestKey(req *ChatRequest) [32]byte {
+	identity := *req
+	identity.Stream = false
+	canon, _ := json.Marshal(&identity)
+	var seed [8]byte
+	binary.BigEndian.PutUint64(seed[:], uint64(s.cfg.Seed))
+	h := sha256.New()
+	h.Write([]byte("agentplane-mockmodel-v1\x00"))
+	h.Write(seed[:])
+	h.Write(canon)
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// failureScore maps a request key to [0, 1). A request fails when its score is
+// below the configured error rate. It is a pure function of seed and request:
+// no shared random generator, so arrival order and concurrency cannot change
+// which requests fail, and a request that fails at one rate fails at every
+// higher rate.
+func failureScore(key [32]byte) float64 {
+	sum := sha256.Sum256(append([]byte("agentplane-mockmodel-failure\x00"), key[:]...))
+	return float64(binary.BigEndian.Uint64(sum[:8])>>11) / float64(1<<53)
+}
+
+func (s *Server) shouldFail(key [32]byte) bool {
+	return s.cfg.ErrorRate > 0 && failureScore(key) < s.cfg.ErrorRate
+}
+
+func idFromKey(key [32]byte) string { return "chatcmpl-" + hex.EncodeToString(key[:8]) }
+
+func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, "POST")
+		return
+	}
+	body, err := readBounded(r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), fallbackID("body"))
+		return
+	}
+	bodySum := sha256.Sum256(body)
+	fail := func(msg string) {
+		writeError(w, http.StatusBadRequest, "invalid_request", msg, "mock-"+hex.EncodeToString(bodySum[:8]))
+	}
+	req, err := decodeRequest(body)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	key := s.requestKey(req)
+	// Simulated processing time. A cancelled request (the client went away)
+	// is abandoned without writing anything.
+	if s.cfg.Latency > 0 {
+		if err := s.wait(r.Context(), s.cfg.Latency); err != nil {
+			return
+		}
+	}
+	if s.shouldFail(key) {
+		writeError(w, http.StatusInternalServerError, "internal_error",
+			"simulated failure (deterministic for this seed and request)", idFromKey(key))
+		return
+	}
+	if req.Stream {
+		s.streamResponse(w, r, req, key)
+		return
+	}
+	resp := s.buildResponse(req, key)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", resp.ID)
+	b, _ := json.Marshal(resp)
+	write(w, append(b, '\n'))
+}
+
+// readBounded reads at most max bytes; a larger body is an error rather than a
+// truncation.
+func readBounded(r *http.Request, max int64) ([]byte, error) {
+	if r.Body == nil {
+		return nil, errors.New("empty request body")
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, max+1))
+	if err != nil {
+		return nil, fmt.Errorf("cannot read request body: %v", err)
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("request body exceeds the %d byte limit", max)
+	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil, errors.New("empty request body")
+	}
+	return b, nil
+}
+
+// decodeRequest parses a body strictly and checks it against the contract's
+// request schema BEFORE any value is coerced. A Go struct cannot tell a missing
+// field from a zero value or a JSON null from an omitted field, so the body is
+// first read as an object of raw members and each member is decoded with its
+// exact type: required members must be present, nothing may be null (the
+// schema declares no nullable request field), unknown members are rejected,
+// and only then are ranges checked. A valid empty content string and omitted
+// optional fields are preserved.
+func decodeRequest(body []byte) (*ChatRequest, error) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	var members map[string]json.RawMessage
+	if err := dec.Decode(&members); err != nil {
+		return nil, fmt.Errorf("invalid JSON request: %v", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("invalid JSON request: unexpected data after the JSON object")
+	}
+	if members == nil { // the literal null decodes into a nil map
+		return nil, errors.New("invalid JSON request: the request must be a JSON object, not null")
+	}
+	keys := make([]string, 0, len(members))
+	for k := range members {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // deterministic error messages
+	var req ChatRequest
+	for _, k := range keys {
+		raw := members[k]
+		var err error
+		switch k {
+		case "model":
+			err = decodeMember(raw, &req.Model, "model")
+		case "messages":
+			err = decodeMessages(raw, &req.Messages)
+		case "max_tokens":
+			var n int64
+			if isNull(raw) {
+				err = errors.New("max_tokens must not be null")
+			} else if n, err = parseMaxTokens(raw); err == nil {
+				req.MaxTokens = &n
+			}
+		case "temperature":
+			var f float64
+			if err = decodeMember(raw, &f, "temperature"); err == nil {
+				req.Temperature = &f
+			}
+		case "top_p":
+			var f float64
+			if err = decodeMember(raw, &f, "top_p"); err == nil {
+				req.TopP = &f
+			}
+		case "stop":
+			err = decodeMember(raw, &req.Stop, "stop")
+			if err == nil && req.Stop == nil {
+				req.Stop = []string{}
+			}
+		case "stream":
+			err = decodeMember(raw, &req.Stream, "stream")
+		default:
+			err = fmt.Errorf("unknown field %q", k)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid JSON request: %v", err)
+		}
+	}
+	for _, required := range []string{"model", "messages"} {
+		if _, ok := members[required]; !ok {
+			return nil, fmt.Errorf("invalid JSON request: %s is required", required)
+		}
+	}
+	if err := req.validate(); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+// parseMaxTokens parses the JSON number text of max_tokens exactly. The contract
+// declares an integer, and JSON Schema accepts every spelling of an integral
+// number (5, 5.0, 5e0, 0.5e1, 500e-2), so the text is expanded as a decimal
+// instead of being passed to a float or an int64 decoder: nothing is rounded, a
+// fractional value is rejected, and equivalent spellings give the same int64
+// (and therefore the same request identity and response). The work is linear in
+// the text length whatever the exponent, so 1e999999999 is refused quickly.
+// maxExponent bounds the exponent of a max_tokens number before it is used in
+// arithmetic. 2^40 exceeds the length of any request body (at most 16 MiB) by
+// far, so saturating to it never changes a decision, and with it
+// len(frac) - exp and len(digits) - scale cannot overflow an int64.
+const maxExponent int64 = 1 << 40
+
+func parseMaxTokens(raw json.RawMessage) (int64, error) {
+	bad := fmt.Errorf("max_tokens must be an integer between 1 and %d", maxSafeInteger)
+	s := string(bytes.TrimSpace(raw))
+	if s == "" || (s[0] != '-' && (s[0] < '0' || s[0] > '9')) {
+		return 0, errors.New("max_tokens has the wrong type: it must be an integer")
+	}
+	neg := s[0] == '-'
+	s = strings.TrimPrefix(s, "-")
+	var exp int64
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		e, err := strconv.ParseInt(s[i+1:], 10, 64) // accepts a sign
+		if err != nil {
+			// out of int64 range: any such exponent is far beyond what matters
+			e = maxExponent
+			if strings.HasPrefix(s[i+1:], "-") {
+				e = -e
+			}
+		}
+		// Saturate before any arithmetic. ParseInt accepts exponents up to the
+		// int64 limits, where len(frac) - exp, the negation of the scale and the
+		// repeat count would overflow. The text is at most a few MiB, so its
+		// significand has far fewer than maxExponent digits: any exponent beyond
+		// +-maxExponent gives a value above 2^53-1 (positive) or a nonzero value
+		// below one (negative), exactly as the saturated exponent does.
+		if e > maxExponent {
+			e = maxExponent
+		} else if e < -maxExponent {
+			e = -maxExponent
+		}
+		exp, s = e, s[:i]
+	}
+	intPart, frac, _ := strings.Cut(s, ".")
+	digits := strings.TrimLeft(intPart+frac, "0")
+	scale := int64(len(frac)) - exp // value = digits / 10^scale
+	switch {
+	case digits == "":
+		return 0, bad // zero (any spelling) is below the minimum
+	case scale > 0:
+		if scale >= int64(len(digits)) {
+			return 0, bad // a nonzero value below one is not an integer
+		}
+		cut := len(digits) - int(scale)
+		if strings.Trim(digits[cut:], "0") != "" {
+			return 0, bad // a nonzero fractional part
+		}
+		digits = digits[:cut]
+	case scale < 0:
+		if int64(len(digits))-scale > 16 { // more digits than 2^53-1 has
+			return 0, bad
+		}
+		digits += strings.Repeat("0", int(-scale))
+	}
+	if len(digits) > 16 || neg {
+		return 0, bad
+	}
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || n < 1 || n > maxSafeInteger {
+		return 0, bad
+	}
+	return n, nil
+}
+
+// decodeMember decodes one member into dst with its exact type. A JSON null is
+// an error: no request field is nullable in the contract.
+func decodeMember(raw json.RawMessage, dst any, name string) error {
+	if isNull(raw) {
+		return fmt.Errorf("%s must not be null", name)
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		return fmt.Errorf("%s has the wrong type or value: %v", name, err)
+	}
+	return nil
+}
+
+func isNull(raw json.RawMessage) bool { return string(bytes.TrimSpace(raw)) == "null" }
+
+// decodeMessages decodes the messages array. Every element must be an object
+// with exactly a string role and a string content (an empty string is valid).
+func decodeMessages(raw json.RawMessage, dst *[]Message) error {
+	if isNull(raw) {
+		return errors.New("messages must not be null")
+	}
+	var elems []json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil {
+		return fmt.Errorf("messages must be an array: %v", err)
+	}
+	msgs := make([]Message, 0, len(elems))
+	for i, el := range elems {
+		if isNull(el) {
+			return fmt.Errorf("messages[%d] must not be null", i)
+		}
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(el, &members); err != nil {
+			return fmt.Errorf("messages[%d] must be an object: %v", i, err)
+		}
+		var m Message
+		for _, k := range []string{"role", "content"} {
+			v, ok := members[k]
+			if !ok {
+				return fmt.Errorf("messages[%d].%s is required", i, k)
+			}
+			target := &m.Content
+			if k == "role" {
+				target = &m.Role
+			}
+			if err := decodeMember(v, target, fmt.Sprintf("messages[%d].%s", i, k)); err != nil {
+				return err
+			}
+		}
+		if len(members) != 2 {
+			// Report the lexicographically first unknown member: ranging over the
+			// map would name a different one on different runs, and the error body
+			// of one request must be byte-identical every time.
+			unknown := make([]string, 0, len(members))
+			for k := range members {
+				if k != "role" && k != "content" {
+					unknown = append(unknown, k)
+				}
+			}
+			if len(unknown) > 0 {
+				sort.Strings(unknown)
+				return fmt.Errorf("messages[%d] has an unknown field %q", i, unknown[0])
+			}
+		}
+		msgs = append(msgs, m)
+	}
+	*dst = msgs
+	return nil
+}
+
+func (r *ChatRequest) validate() error {
+	// OpenAPI maxLength counts characters (Unicode code points), not UTF-8
+	// bytes: a 128-character name of multibyte characters is valid.
+	if n := utf8.RuneCountInString(r.Model); n < 1 || n > 128 {
+		return errors.New("model is required and at most 128 characters")
+	}
+	if len(r.Messages) == 0 {
+		return errors.New("messages must contain at least one message")
+	}
+	for i, m := range r.Messages {
+		switch m.Role {
+		case "system", "user", "assistant":
+		default:
+			return fmt.Errorf("messages[%d].role must be system, user or assistant", i)
+		}
+	}
+	if r.MaxTokens != nil && (*r.MaxTokens < 1 || *r.MaxTokens > maxSafeInteger) {
+		return fmt.Errorf("max_tokens must be between 1 and %d", maxSafeInteger)
+	}
+	if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 2) {
+		return errors.New("temperature must be between 0 and 2")
+	}
+	if r.TopP != nil && (*r.TopP < 0 || *r.TopP > 1) {
+		return errors.New("top_p must be between 0 and 1")
+	}
+	if len(r.Stop) > 4 {
+		return errors.New("stop accepts at most 4 strings")
+	}
+	for _, s := range r.Stop {
+		if s == "" {
+			return errors.New("stop strings must not be empty")
+		}
+	}
+	return nil
+}
+
+var words = [...]string{
+	"alpha", "bravo", "cedar", "delta", "ember", "fjord", "gamma", "harbor",
+	"iris", "jade", "kernel", "lumen", "meadow", "nova", "onyx", "prism",
+	"quartz", "river", "sable", "tundra", "umber", "vertex", "willow", "xenon",
+	"yarrow", "zephyr", "anchor", "beacon", "canyon", "dune", "echo", "forge",
+}
+
+// completionWords derives n words from the request key. Word i depends only on
+// (key, i), so any prefix is stable.
+func completionWords(key [32]byte, n int64) []string {
+	out := make([]string, 0, n)
+	for i := int64(0); i < n; i++ {
+		var ix [8]byte
+		binary.BigEndian.PutUint64(ix[:], uint64(i))
+		sum := sha256.Sum256(append(key[:], ix[:]...))
+		out = append(out, words[int(sum[0])%len(words)])
+	}
+	return out
+}
+
+func (s *Server) simulatedUsage(req *ChatRequest) (prompt, completion int64, finish string) {
+	prompt = s.cfg.PromptTokens
+	if prompt <= 0 {
+		for _, m := range req.Messages {
+			prompt += int64(len(strings.Fields(m.Content)))
+		}
+		if prompt < 1 {
+			prompt = 1
+		}
+	}
+	completion, finish = s.cfg.CompletionTokens, "stop"
+	if req.MaxTokens != nil && completion > *req.MaxTokens {
+		completion, finish = *req.MaxTokens, "length"
+	}
+	return prompt, completion, finish
+}
+
+func (s *Server) buildResponse(req *ChatRequest, key [32]byte) ChatResponse {
+	prompt, completion, finish := s.simulatedUsage(req)
+	content := strings.Join(completionWords(key, completion), " ")
+	return ChatResponse{
+		ID:      idFromKey(key),
+		Object:  "chat.completion",
+		Created: fixedCreated,
+		Model:   req.Model,
+		Choices: []chatChoice{{Index: 0, Message: Message{Role: "assistant", Content: content}, FinishReason: finish}},
+		Usage:   Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: prompt + completion},
+	}
+}
+
+// NewHTTPServer wraps the handler with bounded timeouts. Header and body reads
+// are limited so a slow client cannot hold a connection open indefinitely.
+func NewHTTPServer(cfg Config, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+	}
+}
+
+// Serve serves on ln until ctx is cancelled, then shuts down gracefully
+// (in-flight requests get a bounded time to finish).
+func Serve(ctx context.Context, srv *http.Server, ln net.Listener) error {
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+	select {
+	case err := <-errc:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
+		if err := <-errc; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
+}

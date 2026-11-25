@@ -35,7 +35,7 @@ The `Makefile` fails with an actionable message if gitleaks or golangci-lint is 
 | `internal/contractcheck/` | Test-only validation of the gateway and audit contracts |
 | `controllers/` | Tenant and Agent controllers (Phase 1) |
 | `gateway/` | LLM and tool gateway (Phase 2) |
-| `mockmodel/` | Deterministic mock model for tests (P0-T4) |
+| `mockmodel/`, `cmd/mockmodel/` | Deterministic mock chat model and its command (P0-T4; see `docs/mockmodel.md`) |
 | `audit/` | Audit hash-chain library and CLI (Phase 2) |
 | `policy/` | Gatekeeper policies (Phase 3) |
 | `infra/terraform/` | Azure infrastructure (Phase 4) |
@@ -67,6 +67,8 @@ Override the name with `KIND_CLUSTER_NAME=<name>`. `kind create cluster` merges 
 | `make secrets` | Scans every tracked working-tree file with gitleaks, redacted output. `go.sum` is scanned through stdin with only exact module/version/checksum lines removed (see below). |
 | `make secrets-history` | Scans every line ever added to `go.sum`. |
 | `make secrets-selftest` | Regression tests for the scanner itself: checksum lines pass, keys in `go.sum` and other files are detected, redaction holds, and scanner errors fail. |
+| `make mock-run` | Runs the deterministic mock chat model on loopback (see [`docs/mockmodel.md`](docs/mockmodel.md)). |
+| `make mock-smoke` | Starts a disposable mock server, checks determinism, streaming, validation and failures, and stops it. Needs go, curl and python3. |
 | `make contracts-check` | Validates the gateway and audit contract fixtures: OpenAPI and JSON Schema validation of positive and negative fixtures, independent recomputation of hashes and signatures, and the audit verification rules. Needs go and python3. |
 
 The Go module exists (since P0-T3), so the Go targets run for real and propagate failures. Go source without a root `go.mod` is an error, and a repository without Go source and without `go.mod` would report `NOT APPLICABLE` and succeed. The checks live in `scripts/check-go.sh` and `scripts/scan-secrets.sh`. **`go.sum` and gitleaks:** gitleaks' built-in configuration allowlists any path named `go.sum` for every rule, so path-aware scans (`gitleaks dir`, `gitleaks git`) never look inside it. The scripts therefore scan the root `go.sum` through stdin and drop only lines with the exact structure `module v<version>[/go.mod] h1:<43 base64 characters>=` (public checksums that trip the generic-api-key rule on module names containing "api"). Any other line in `go.sum`, a `go.sum` in a subdirectory, and every other rule are scanned in full. A secret that is itself shaped like a checksum line cannot be told apart by content; that residual risk is accepted.
@@ -78,7 +80,7 @@ Hooks: `pre-commit install --hook-type pre-commit --hook-type pre-push`, then `p
 `.github/workflows/ci.yml` runs on pull requests and pushes to `main` with read-only permissions, job timeouts, commit-pinned actions and pinned tool versions (pre-commit 4.7.0, gitleaks 8.30.1, golangci-lint 2.15.0; Go module dependencies pinned in `go.mod` and `go.sum`). Four jobs:
 
 - `lint`: `pre-commit validate-config`, then `pre-commit run --all-files` (YAML and private-key checks, `actionlint` workflow syntax validation at v1.7.12, `make fmt-check`, `make lint`).
-- `unit-test`: `make test` (`go test -race ./...`, including the contract tests).
+- `unit-test`: `make test` (`go test -race ./...`, including the contract and mock model tests) and `make mock-smoke`.
 - `contracts`: `make contracts-check`.
 - `gitleaks`: `gitleaks git --redact --no-banner --log-opts="--all" .` over full history, `make secrets`, `make secrets-history` (go.sum history) and `make secrets-selftest`.
 
