@@ -73,6 +73,10 @@ jobs:
       # signal cleanup, and that unrelated processes survive.
       - name: make smoke-cleanup-test
         run: make smoke-cleanup-test
+      # Kind topology, node-shape checks and cluster targeting, with stub tools:
+      # no Docker, no cluster and no network.
+      - name: make kind-config-test
+        run: make kind-config-test
       # Starts a disposable mock model on a loopback port and checks it
       # end to end (determinism, streaming, validation, failures, shutdown).
       - name: make mock-smoke
