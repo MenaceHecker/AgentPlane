@@ -118,6 +118,10 @@ diag op_stop reused; r3=$?
 if [ "$r3" -eq 0 ] && [ "$(wc -l <"$KILL_LOG" | tr -d ' ')" = "$mark" ] && running "$reused_pid"; then ok "an entry marked reaped is never signalled, even if its PID is now a live process of ours"; else bad "a reaped entry's PID was signalled (rc=$r3)"; fi
 OP_REAPED[$idx]=""; op_stop reused 2>/dev/null   # really stop it now
 
+WATCHDOG_FILE="$fix/watchdog-fired"
+watchdog_start() { rm -f "$WATCHDOG_FILE"; ( sleep "$2"; if command ps -p "$1" >/dev/null 2>&1; then echo fired >"$WATCHDOG_FILE"; builtin kill -KILL "$1" 2>/dev/null; fi ) >/dev/null 2>&1 & WD=$!; disown "$WD" 2>/dev/null || true; }
+watchdog_stop() { builtin kill "$WD" 2>/dev/null || true; }
+
 # 5c. identity changes. The library must revalidate who a PID belongs to at every poll and immediately
 #     before each signal. A wrapper for `ps` (used only by the library; this test's own helpers use
 #     `command ps`) can report a different parent or start time, from the beginning or after a given
@@ -126,7 +130,7 @@ OP_REAPED[$idx]=""; op_stop reused 2>/dev/null   # really stop it now
 PS_MODE=normal; PS_FLIP_SIGNAL=""; PS_FLIP_CALLS=0; PS_FLIP_MODE=normal; PS_MARK=0; PS_SEEN_FILE="$fix/ps-seen"; : >"$PS_SEEN_FILE"
 ps() {
   local mode="$PS_MODE" out rc
-  if [ -n "$PS_FLIP_SIGNAL" ] && tail -n +$((PS_MARK + 1)) "$KILL_LOG" | grep -q -- "-$PS_FLIP_SIGNAL "; then
+  if [ -n "$PS_FLIP_SIGNAL" ] && { [ "$PS_FLIP_SIGNAL" = ANY ] || tail -n +$((PS_MARK + 1)) "$KILL_LOG" | grep -q -- "-$PS_FLIP_SIGNAL "; }; then
     echo x >>"$PS_SEEN_FILE"   # a file, not a variable: the library calls ps inside a command substitution
     [ "$(wc -l <"$PS_SEEN_FILE" | tr -d ' ')" -lt "$PS_FLIP_CALLS" ] || mode="$PS_FLIP_MODE"
   fi
@@ -155,7 +159,8 @@ only_registered_signalled() { # only_registered_signalled PID: every signal sinc
 ps_reset
 start_child idtest1 ignore; id1pid="$(op_pid idtest1)"
 PS_MODE=foreign-ppid   # from now on ps reports that our child belongs to someone else
-diag op_stop idtest1; r=$?
+watchdog_start "$id1pid" 8
+diag op_stop idtest1; r=$?; watchdog_stop
 if [ "$r" -eq 1 ] && grep -q 'cannot establish its state' "$fix/diag.txt" && grep -q 'job table lists our child as running' "$fix/diag.txt" && [ "$(signals_since '^-')" -eq 0 ] && running "$id1pid" && running "$canary"; then ok "identity: ps claiming another owner for a child the job table says is running is refused (no TERM, no KILL, no wait)"; else bad "identity at first probe (rc=$r, signals=$(signals_since '^-')): $(cat "$fix/diag.txt")"; fi
 ps_reset; teardown_child idtest1
 
@@ -171,14 +176,25 @@ ps_reset; OP_REAPED[$(op__index idtest1b)]=1; OP_RESULT[$(op__index idtest1b)]=0
 
 ps_reset; PS_FLIP_SIGNAL=TERM; PS_FLIP_CALLS=2; PS_FLIP_MODE=foreign-start
 start_child idtest2 ignore; id2pid="$(op_pid idtest2)"
-diag op_stop idtest2; r=$?
+watchdog_start "$id2pid" 8
+diag op_stop idtest2; r=$?; watchdog_stop
 if [ "$r" -eq 1 ] && [ "$(signals_since '-TERM')" -eq 1 ] && [ "$(signals_since '-KILL')" -eq 0 ] && only_registered_signalled "$id2pid" && grep -q 'not escalating' "$fix/diag.txt" && running "$id2pid" && running "$canary"; then ok "identity: if the owner changes after SIGTERM, while polling, the library does not escalate (one TERM, no KILL)"; else bad "identity change while polling (rc=$r, TERM=$(signals_since '-TERM') KILL=$(signals_since '-KILL')): $(cat "$fix/diag.txt")"; fi
 ps_reset; teardown_child idtest2
+
+# the second ps call of a stop is the one made immediately before SIGTERM
+ps_reset; PS_FLIP_SIGNAL=ANY; PS_FLIP_CALLS=2; PS_FLIP_MODE=foreign-start
+start_child idtest2b ignore; id2bpid="$(op_pid idtest2b)"
+: >"$PS_SEEN_FILE"
+watchdog_start "$id2bpid" 8
+diag op_stop idtest2b; r=$?; watchdog_stop
+if [ "$r" -eq 1 ] && [ "$(signals_since '^-')" -eq 0 ] && grep -q 'refused to send SIGTERM' "$fix/diag.txt" && running "$id2bpid" && running "$canary"; then ok "identity: if the owner changes between the first probe and SIGTERM, SIGTERM is not sent"; else bad "identity change before TERM (rc=$r, signals=$(signals_since '^-')): $(cat "$fix/diag.txt")"; fi
+ps_reset; teardown_child idtest2b
 
 OWNED_PROCESS_TERM_MS=100 OWNED_PROCESS_POLL_MS=20
 ps_reset; PS_FLIP_SIGNAL=TERM; PS_FLIP_CALLS=7; PS_FLIP_MODE=foreign-start   # the 7th ps call after TERM is the one made immediately before SIGKILL
 start_child idtest3 ignore; id3pid="$(op_pid idtest3)"
-diag op_stop idtest3; r=$?
+watchdog_start "$id3pid" 8
+diag op_stop idtest3; r=$?; watchdog_stop
 if [ "$r" -eq 1 ] && [ "$(signals_since '-TERM')" -eq 1 ] && [ "$(signals_since '-KILL')" -eq 0 ] && grep -q 'refused to send SIGKILL' "$fix/diag.txt" && only_registered_signalled "$id3pid" && running "$id3pid" && running "$canary"; then ok "identity: if the owner changes between the last poll and SIGKILL, SIGKILL is not sent (the foreign canary is untouched)"; else bad "identity change before KILL (rc=$r, TERM=$(signals_since '-TERM') KILL=$(signals_since '-KILL')): $(cat "$fix/diag.txt")"; fi
 ps_reset; teardown_child idtest3
 export OWNED_PROCESS_TERM_MS=400 OWNED_PROCESS_POLL_MS=20
@@ -188,13 +204,34 @@ diag op_stop idtest4; r=$?
 if [ "$r" -eq 1 ] && [ "$(signals_since '-KILL')" -eq 1 ] && only_registered_signalled "$id4pid" && gone "$id4pid"; then ok "identity (control): with an unchanged identity the same TERM-ignoring child is escalated and killed"; else bad "identity control (rc=$r)"; fi
 ps_reset
 
+# an exited child with an unusable ps: not an answer, so fail closed (never a wait on a guess)
+ps_reset
+python3 -I "$fix/child.py" exit0 >/dev/null 2>&1 &
+ex_pid=$!; track_pid "$ex_pid"; op_register exited-empty "$ex_pid" || bad "could not register the short-lived child"
+sleep 0.4; PS_MODE=empty
+diag op_stop exited-empty; r=$?
+if [ "$r" -eq 1 ] && grep -q 'cannot establish its state' "$fix/diag.txt"; then ok "an exited child whose state query returns nothing is not assumed to have exited cleanly (fails closed)"; else bad "exited child with empty ps (rc=$r): $(cat "$fix/diag.txt")"; fi
+ps_reset; PS_MODE=normal; diag op_stop exited-empty
+
+# a child this shell started but that is not in its job table (disowned) cannot be registered
+ps_reset
+python3 -I "$fix/child.py" term0 >/dev/null 2>&1 &
+dis_pid=$!; track_pid "$dis_pid"; disown "$dis_pid"
+if ! diag op_register disowned "$dis_pid" && grep -q "not in this shell's job table" "$fix/diag.txt"; then ok "a child that is not in the shell's job table is not registered"; else bad "registered a disowned child: $(cat "$fix/diag.txt")"; fi
+builtin kill -KILL "$dis_pid" 2>/dev/null; ps_reset
+
+# the path normaliser, directly
+norm_ok=1
+for pair in "/a/b|/a/b" "/a/b/|/a/b" "/a/b///|/a/b" "//a//b//|/a/b" "/a b//c d///|/a b/c d" "/|/" "//|/" "///|/" "rel//x/|rel/x"; do
+  in="${pair%%|*}"; want="${pair#*|}"; got="$(op__norm "$in")"
+  [ "$got" = "$want" ] || { norm_ok=0; bad "op__norm '$in' gave '$got', want '$want'"; }
+done
+[ "$norm_ok" -eq 1 ] && ok "the path normaliser collapses repeated slashes, drops trailing ones, keeps spaces and a lone root"
+
 # 5d. observation failures (review r1, finding 2). When the library cannot establish a child's state it
 #     must signal nothing, WAIT FOR NOTHING and fail with a diagnostic, never claim success. The child is
 #     long-lived (it would run 600 s). An outer watchdog, which belongs to the test, kills only that child
 #     after 6 s so a regression to an unbounded wait shows up as a failed assertion instead of a hang.
-WATCHDOG_FILE="$fix/watchdog-fired"
-watchdog_start() { rm -f "$WATCHDOG_FILE"; ( sleep "$2"; if command ps -p "$1" >/dev/null 2>&1; then echo fired >"$WATCHDOG_FILE"; builtin kill -KILL "$1" 2>/dev/null; fi ) >/dev/null 2>&1 & WD=$!; disown "$WD" 2>/dev/null || true; }
-watchdog_stop() { builtin kill "$WD" 2>/dev/null || true; }
 observe_case() { # observe_case LABEL WANT_TEXT -- runs op_stop on a fresh long-lived child under the current ps/jobs setup
   local label="$1" want="$2" pid t0 r elapsed
   start_child obs term0; pid="$(op_pid obs)"
@@ -272,7 +309,11 @@ root="${TMPDIR:-/tmp}"; root="${root%/}"
 run_harness() { # run_harness MODE -> sets H_RC, H_DIR; the harness runs with its own copy of the settings
   H_DIR="$fix/h-$1"; mkdir -p "$H_DIR"
   mkdir -p "$root/optest-harness.decoy-$1" # same prefix, not created by the harness: must survive
-  "$fix/harness.sh" "$1" "$H_DIR" >"$H_DIR/out" 2>"$H_DIR/err"; H_RC=$?
+  "$fix/harness.sh" "$1" "$H_DIR" >"$H_DIR/out" 2>"$H_DIR/err" &
+  local hp=$! n=0
+  while builtin kill -0 "$hp" 2>/dev/null && [ "$n" -lt 400 ]; do sleep 0.05; n=$((n + 1)); done   # at most 20 s
+  if builtin kill -0 "$hp" 2>/dev/null; then builtin kill -KILL "$hp" 2>/dev/null; wait "$hp" 2>/dev/null; H_RC=124; echo "harness exceeded 20 s" >>"$H_DIR/err"
+  else wait "$hp"; H_RC=$?; fi
 }
 check_clean() { # check_clean MODE -> workdir removed, child reaped, decoy kept
   local wd cp; wd="$(cat "$1/workdir" 2>/dev/null)"; cp="$(cat "$1/childpid" 2>/dev/null)"

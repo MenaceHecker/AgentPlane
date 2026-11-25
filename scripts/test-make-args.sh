@@ -89,9 +89,9 @@ PY
     then ok; else bad "mock-image $mode MOCK_IMAGE [$name] marker=$([ -e "$marker" ] && echo CREATED || echo no): the value was not passed as exactly one argument after -t: $(tr '\n' '|' <"$STUB_LOG")"; fi
     # --- mock-image-scan: bad image reference and bad scanner version refused before docker is asked anything
     run_make "$mode" mock-image-scan MOCK_IMAGE "$value"
-    if [ ! -e "$marker" ] && [ "$RC" -ne 0 ] && ! grep -q '^save$' "$STUB_LOG" && ! grep -q '^inspect$' "$STUB_LOG"; then ok; else bad "mock-image-scan $mode MOCK_IMAGE [$name] rc=$RC marker=$([ -e "$marker" ] && echo CREATED || echo no): $OUT"; fi
+    if [ ! -e "$marker" ] && [ "$RC" -ne 0 ] && ! grep -q '^save$' "$STUB_LOG" && ! grep -q '^inspect$' "$STUB_LOG" && printf '%s' "$OUT" | grep -q 'must be a plain reference'; then ok; else bad "mock-image-scan $mode MOCK_IMAGE [$name] rc=$RC marker=$([ -e "$marker" ] && echo CREATED || echo no): $OUT"; fi
     run_make "$mode" mock-image-scan IMAGE_SCANNER_VERSION "$value"
-    if [ ! -e "$marker" ] && [ "$RC" -ne 0 ] && ! grep -q '^image$' "$STUB_LOG"; then ok; else bad "mock-image-scan $mode IMAGE_SCANNER_VERSION [$name] rc=$RC marker=$([ -e "$marker" ] && echo CREATED || echo no): $OUT"; fi
+    if [ ! -e "$marker" ] && [ "$RC" -ne 0 ] && ! grep -q '^image$' "$STUB_LOG" && printf '%s' "$OUT" | grep -q 'must be digits and dots'; then ok; else bad "mock-image-scan $mode IMAGE_SCANNER_VERSION [$name] rc=$RC marker=$([ -e "$marker" ] && echo CREATED || echo no): $OUT"; fi
     # --- mock-run: MOCK_ARGS is word-split into flags, never parsed as shell
     run_make "$mode" mock-run MOCK_ARGS "$value"
     if [ ! -e "$marker" ]; then ok; else bad "mock-run $mode MOCK_ARGS [$name] executed a payload"; fi
