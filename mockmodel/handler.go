@@ -351,6 +351,12 @@ func decodeRequest(body []byte) (*ChatRequest, error) {
 // fractional value is rejected, and equivalent spellings give the same int64
 // (and therefore the same request identity and response). The work is linear in
 // the text length whatever the exponent, so 1e999999999 is refused quickly.
+// maxExponent bounds the exponent of a max_tokens number before it is used in
+// arithmetic. 2^40 exceeds the length of any request body (at most 16 MiB) by
+// far, so saturating to it never changes a decision, and with it
+// len(frac) - exp and len(digits) - scale cannot overflow an int64.
+const maxExponent int64 = 1 << 40
+
 func parseMaxTokens(raw json.RawMessage) (int64, error) {
 	bad := fmt.Errorf("max_tokens must be an integer between 1 and %d", maxSafeInteger)
 	s := string(bytes.TrimSpace(raw))
@@ -364,10 +370,21 @@ func parseMaxTokens(raw json.RawMessage) (int64, error) {
 		e, err := strconv.ParseInt(s[i+1:], 10, 64) // accepts a sign
 		if err != nil {
 			// out of int64 range: any such exponent is far beyond what matters
-			e = 1 << 40
+			e = maxExponent
 			if strings.HasPrefix(s[i+1:], "-") {
 				e = -e
 			}
+		}
+		// Saturate before any arithmetic. ParseInt accepts exponents up to the
+		// int64 limits, where len(frac) - exp, the negation of the scale and the
+		// repeat count would overflow. The text is at most a few MiB, so its
+		// significand has far fewer than maxExponent digits: any exponent beyond
+		// +-maxExponent gives a value above 2^53-1 (positive) or a nonzero value
+		// below one (negative), exactly as the saturated exponent does.
+		if e > maxExponent {
+			e = maxExponent
+		} else if e < -maxExponent {
+			e = -maxExponent
 		}
 		exp, s = e, s[:i]
 	}
