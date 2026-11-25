@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -60,6 +61,11 @@ func TestMaxTokensAcceptsEveryIntegralSpelling(t *testing.T) {
 		{"huge positive exponent", "1e999999999", false, false},
 		{"huge negative exponent", "1e-999999999", false, false},
 		{"huge exponent on a zero mantissa", "0e999999999", false, false},
+		// exponents beyond int64 must still be refused, not wrapped to a small one
+		{"exponent beyond int64", "5e99999999999999999999", false, false},
+		{"negative exponent beyond int64", "5e-99999999999999999999", false, false},
+		{"zero mantissa with an exponent beyond int64", "0e99999999999999999999", false, false},
+		{"integral spelling needing an exponent beyond int64", "5000e-99999999999999999999", false, false},
 	}
 	for _, tt := range tests {
 		for _, form := range []string{"plain", "streamed"} {
@@ -138,6 +144,25 @@ func TestParseMaxTokensMatchesExactRationalArithmetic(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// A huge exponent must be refused without expanding it: the parser is linear in
+// the text length. The memory allocated while refusing 1e99999999 (a hundred
+// million zeros if it were expanded) must stay tiny.
+func TestHugeExponentIsRefusedWithoutExpansion(t *testing.T) {
+	for _, text := range []string{"1e99999999", "9e99999999", "1.5e99999999", "100000e-99999999"} {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		_, err := parseMaxTokens(json.RawMessage(text))
+		runtime.ReadMemStats(&after)
+		if err == nil {
+			t.Fatalf("%s must be refused", text)
+		}
+		if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
+			t.Errorf("refusing %s allocated %d bytes: the exponent was expanded", text, grew)
 		}
 	}
 }
