@@ -70,7 +70,8 @@ Override the name with `KIND_CLUSTER_NAME=<name>`. kind merges the new context i
 | `make secrets-selftest` | Regression tests for the scanner itself: checksum lines pass, keys in `go.sum` and other files are detected, redaction holds, and scanner errors fail. |
 | `make mock-run` | Runs the deterministic mock chat model on loopback (see [`docs/mockmodel.md`](docs/mockmodel.md)). |
 | `make mock-smoke` | Starts a disposable mock server, checks determinism, streaming, validation and failures, and stops it. Needs go, curl and python3. |
-| `make smoke-cleanup-test` | Tests the owned-process helper the smoke script uses: bounded termination, a TERM-ignoring child, partial-start and signal cleanup, unrelated processes surviving. Needs bash and python3. |
+| `make smoke-cleanup-test` | Tests the owned-process helper the smoke script uses: bounded termination, a TERM-ignoring child, child identity rechecked before every signal, no wait on an unknown process state, partial-start and signal cleanup, unrelated processes surviving. Needs bash, python3 and a `ps` that supports `-o lstart`. |
+| `make make-args-test` | Tests that Make variables (cluster name, image, versions, mock flags) reach the scripts as data: quotes, substitutions and shell metacharacters in a value execute nothing, and invalid values are refused before any tool runs. Stub tools only. |
 | `make kind-config-test` | Tests the kind topology, node-shape checks and cluster targeting with stub tools (no Docker, no cluster). Needs go and python3. |
 | `make mock-image` | Builds the nonroot local image `agentplane/mockmodel:p0` (needs Docker; pushes nothing). |
 | `make mock-image-scan` | Scans it with the pinned Trivy; fails on fixable HIGH/CRITICAL findings and on any scan failure, prints everything else. Needs network for the database. |
@@ -86,7 +87,7 @@ Hooks: `pre-commit install --hook-type pre-commit --hook-type pre-push`, then `p
 `.github/workflows/ci.yml` runs on pull requests and pushes to `main` with read-only permissions, job timeouts, commit-pinned actions and pinned tool versions (pre-commit 4.7.0, gitleaks 8.30.1, golangci-lint 2.15.0; Go module dependencies pinned in `go.mod` and `go.sum`). Five jobs:
 
 - `lint`: `pre-commit validate-config`, then `pre-commit run --all-files` (YAML and private-key checks, `actionlint` workflow syntax validation at v1.7.12, `make fmt-check`, `make lint`).
-- `unit-test`: `make test` (`go test -race ./...`, including the contract, mock model and kind-topology tests), `make smoke-cleanup-test`, `make kind-config-test` and `make mock-smoke`.
+- `unit-test`: `make test` (`go test -race ./...`, including the contract, mock model and kind-topology tests), `make smoke-cleanup-test`, `make make-args-test`, `make kind-config-test` and `make mock-smoke`.
 - `contracts`: `make contracts-check`.
 - `image`: `make image-scan-test`, `make mock-image`, container start and hardened-run checks, a checksum-verified install of Trivy 0.76.2, and `make mock-image-scan`. Nothing is pushed.
 - `gitleaks`: `gitleaks git --redact --no-banner --log-opts="--all" .` over full history, `make secrets`, `make secrets-history` (go.sum history) and `make secrets-selftest`.

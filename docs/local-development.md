@@ -27,6 +27,7 @@ CI**, and creating one on Linux or on amd64 hardware has not been tested.
 | Tool | Pin | Install |
 | --- | --- | --- |
 | Git, GNU Make, curl, python3 (3.8 or newer, standard library only) | any recent | OS package manager |
+| `ps` with `-o ppid`, `-o stat` and `-o lstart` (macOS, or procps on Linux) | any recent | OS; not busybox. The smoke harness uses it to confirm a process is still its own child before signalling it; if `ps` is unusable it fails closed and signals nothing |
 | Go | the `go` directive in `go.mod` (1.27.3) | https://go.dev/dl |
 | Docker (Desktop or Engine) | running daemon; cgroup v2 | https://docs.docker.com/get-docker |
 | kind | **v0.31.0 exactly** (the script refuses any other) | `brew install kind` or the release binary, see [`deploy/kind/README.md`](../deploy/kind/README.md) |
@@ -62,7 +63,7 @@ GHSA-mcj4-mphf-j9ff and GHSA-8rc5-4fr6-64pw.
 ```bash
 git clone https://github.com/MenaceHecker/AgentPlane.git && cd AgentPlane
 make fmt-check lint test secrets contracts-check   # quality checks
-make smoke-cleanup-test kind-config-test image-scan-test   # harness tests: no cluster, no network
+make smoke-cleanup-test make-args-test kind-config-test image-scan-test   # harness tests: no cluster, no network
 make mock-smoke                                    # builds and runs a disposable mock model on loopback
 ```
 
@@ -89,6 +90,8 @@ Rules the scripts enforce:
   never uses the current context for any operation. Check
   `kubectl config current-context` before running other kubectl commands. If it
   points at an unrelated cluster, keep using explicit `--context`.
+- **`make kind-up` fails if it cannot put your kubectl context back.** It reads the current context back after restoring it, and exits nonzero (reporting the context you actually have and the command to fix it) if it is not what it was. `make kind-down` does the same check.
+- **Make variables are data.** `KIND_CLUSTER_NAME`, `MOCK_IMAGE`, `KIND_VERSION`, `IMAGE_SCANNER_VERSION` and `MOCK_ARGS` reach the scripts through the environment, never as shell text, so quotes and `$(...)` in a value execute nothing; names and image references are validated before any tool runs.
 - **`make kind-up` never recreates or deletes a cluster.** If `<name>` already
   exists it is accepted only when its nodes match
   [`deploy/kind/config.yaml`](../deploy/kind/config.yaml) (count, roles, pool
@@ -140,6 +143,8 @@ rescan and record the digests in the run report.
 | `the existing cluster '<name>' was NOT changed` plus a list of differences | The cluster does not match the config. Use another name, or, with the owner's approval, `make kind-down KIND_CLUSTER_NAME=<name>` and then `make kind-up`. |
 | `refusing to recreate '<name>' because its state could not be read` | The cluster exists but kubectl cannot read it (Docker paused, cluster stopped). Fix that first; nothing was changed. |
 | kubectl talks to the wrong cluster | Always pass `--context kind-<name>`; check `kubectl config current-context`. |
+| `could not restore your kubectl current context` | kubectl refused `use-context` or `unset`. Run the command the message prints, then check `kubectl config current-context`. The cluster itself was created or checked. |
+| `cannot establish its state ... not signalling and not waiting` (smoke harness) | `ps` or the shell job table gave no usable answer, so the harness refused to signal or wait on that process. Check that `ps -o ppid=,stat=,lstart= -p $$` works; the named process may still be running and can be stopped by hand. |
 | `Trivy 0.76.2 is required` or `SCAN_TRIVY_VERSION is not set` | Install the pinned Trivy and run through `make mock-image-scan`. |
 | scan: `NOT a pass` / `INVALID REPORT` | The database could not be downloaded or the report is unusable. Check network access to `mirror.gcr.io`/`ghcr.io` and rerun; a failed scan is never reported as clean. |
 | scan: `GATE FAILED` | A HIGH or CRITICAL finding has a fix. Update the base image or Go version and rebuild. |
@@ -151,6 +156,7 @@ rescan and record the digests in the run report.
 - Local only; one tested host (macOS arm64). No Linux or amd64 cluster claim.
 - Labels and the taint are placement simulation, not isolation (no NetworkPolicy
   enforcement, no Pod Security, no policy engine yet).
+- Process identity: the smoke harness checks that a PID is still its own child (parent and start time, cross-checked with the shell job table) at every poll and immediately before each signal, and signals nothing if that cannot be established. A window of microseconds between the last check and the kill system call cannot be closed by any PID-based check; closing it would need a supervisor process or a kernel process handle (see `agents/runs/P0-T5.md`).
 - Scan results are a point-in-time record against the database downloaded at
   scan time and say nothing about future findings or about unscanned images.
 - The kind binary from Homebrew is not byte-identical to the upstream release
