@@ -121,7 +121,7 @@ echo "mock-smoke: --error-rate=1 fails deterministically with 500"
 for name in main failing; do
   pid="$(op_pid "$name")"
   op_stop "$name" || fail "$name (pid $pid) did not shut down cleanly on SIGTERM (see the diagnostics above)"
-  if op__running "$pid"; then fail "$name (pid $pid) is still running"; fi
+  if ps -p "$pid" >/dev/null 2>&1; then fail "$name (pid $pid) is still in the process table"; fi
 done
 if curl -fsS --max-time 2 "http://$MAIN_ADDR/readyz" >/dev/null 2>&1; then fail "the main server still answers after shutdown"; fi
 echo "mock-smoke: both servers exited 0 on SIGTERM and no owned process survives"

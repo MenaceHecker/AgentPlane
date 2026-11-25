@@ -48,7 +48,9 @@ export OWNED_PROCESS_TERM_MS=400 OWNED_PROCESS_KILL_MS=3000 OWNED_PROCESS_POLL_M
 KILL_LOG="$fix/kill.log"; : >"$KILL_LOG"
 kill() { echo "$*" >>"$KILL_LOG"; builtin kill "$@"; }
 
-gone() { ! op__running "$1" && [ -z "$(op__state "$1")" ]; } # fully reaped: no process table entry
+# ps-based helpers for the TEST (independent of the library under test)
+running() { local s; s="$(command ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"; [ -n "$s" ] && case "$s" in Z*) return 1 ;; esac; }
+gone() { [ -z "$(command ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')" ]; }   # fully reaped: no process table entry
 
 start_child() { # start_child NAME MODE -> registers NAME; waits until the child is up
   python3 -I "$fix/child.py" "$2" >"$fix/$1.out" 2>&1 &
@@ -103,8 +105,67 @@ reused_pid="$(op_pid reused)"; idx="$(op__index reused)"
 OP_REAPED[$idx]=1; OP_RESULT[$idx]=0   # pretend it was reaped while its PID is in fact a live child
 mark="$(wc -l <"$KILL_LOG" | tr -d ' ')"
 diag op_stop reused; r3=$?
-if [ "$r3" -eq 0 ] && [ "$(wc -l <"$KILL_LOG" | tr -d ' ')" = "$mark" ] && op__running "$reused_pid"; then ok "an entry marked reaped is never signalled, even if its PID is now a live process of ours"; else bad "a reaped entry's PID was signalled (rc=$r3)"; fi
+if [ "$r3" -eq 0 ] && [ "$(wc -l <"$KILL_LOG" | tr -d ' ')" = "$mark" ] && running "$reused_pid"; then ok "an entry marked reaped is never signalled, even if its PID is now a live process of ours"; else bad "a reaped entry's PID was signalled (rc=$r3)"; fi
 OP_REAPED[$idx]=""; op_stop reused 2>/dev/null   # really stop it now
+
+# 5c. identity changes. The library must revalidate who a PID belongs to at every poll and immediately
+#     before each signal. A wrapper for `ps` (used only by the library; this test's own helpers use
+#     `command ps`) can report a different parent or start time, from the beginning or after a given
+#     signal and a given number of ps calls. The registered children really stay alive and an
+#     unrelated canary with the same command line must never be signalled.
+PS_MODE=normal; PS_FLIP_SIGNAL=""; PS_FLIP_CALLS=0; PS_FLIP_MODE=normal; PS_MARK=0; PS_SEEN_FILE="$fix/ps-seen"; : >"$PS_SEEN_FILE"
+ps() {
+  local mode="$PS_MODE" out rc
+  if [ -n "$PS_FLIP_SIGNAL" ] && tail -n +$((PS_MARK + 1)) "$KILL_LOG" | grep -q -- "-$PS_FLIP_SIGNAL "; then
+    echo x >>"$PS_SEEN_FILE"   # a file, not a variable: the library calls ps inside a command substitution
+    [ "$(wc -l <"$PS_SEEN_FILE" | tr -d ' ')" -lt "$PS_FLIP_CALLS" ] || mode="$PS_FLIP_MODE"
+  fi
+  case "$mode" in
+    normal) command ps "$@" ;;
+    fail) return 2 ;;
+    empty) return 0 ;;
+    absent) return 1 ;;
+    foreign-start|foreign-ppid)
+      out="$(command ps "$@")"; rc=$?
+      [ "$rc" -eq 0 ] || return "$rc"
+      if [ "$mode" = foreign-start ]; then printf '%s\n' "$out" | sed -E 's/^( *[0-9]+ +[^ ]+ +)[A-Za-z]{3}/\1Zzz/'
+      else printf '%s\n' "$out" | sed -E 's/^ *[0-9]+/ 1/'; fi ;;
+  esac
+}
+ps_reset() { PS_MODE=normal; PS_FLIP_SIGNAL=""; PS_FLIP_CALLS=0; PS_FLIP_MODE=normal; : >"$PS_SEEN_FILE"; PS_MARK="$(wc -l <"$KILL_LOG" | tr -d ' ')"; }
+signals_since() { tail -n +$((PS_MARK + 1)) "$KILL_LOG" | grep -c -- "$1"; }
+teardown_child() { # end a test child ourselves (never through the library under test)
+  local p; p="$(op_pid "$1")"; builtin kill -KILL "$p" 2>/dev/null; wait "$p" 2>/dev/null; OP_REAPED[$(op__index "$1")]=1; OP_RESULT[$(op__index "$1")]=0
+}
+only_registered_signalled() { # only_registered_signalled PID: every signal since the mark went to PID
+  ! tail -n +$((PS_MARK + 1)) "$KILL_LOG" | grep -v -- " $1\$"
+}
+
+ps_reset
+start_child idtest1 ignore; id1pid="$(op_pid idtest1)"
+PS_MODE=foreign-ppid   # from now on ps reports that our child belongs to someone else
+diag op_stop idtest1; r=$?
+if [ "$r" -eq 1 ] && grep -q 'identity changed' "$fix/diag.txt" && [ "$(signals_since '^-')" -eq 0 ] && running "$id1pid" && running "$canary"; then ok "identity: a PID that is no longer reported as our child is never signalled (no TERM, no KILL)"; else bad "identity at first probe (rc=$r, signals=$(signals_since '^-')): $(cat "$fix/diag.txt")"; fi
+ps_reset; teardown_child idtest1
+
+ps_reset; PS_FLIP_SIGNAL=TERM; PS_FLIP_CALLS=2; PS_FLIP_MODE=foreign-start
+start_child idtest2 ignore; id2pid="$(op_pid idtest2)"
+diag op_stop idtest2; r=$?
+if [ "$r" -eq 1 ] && [ "$(signals_since '-TERM')" -eq 1 ] && [ "$(signals_since '-KILL')" -eq 0 ] && only_registered_signalled "$id2pid" && grep -q 'not escalating' "$fix/diag.txt" && running "$id2pid" && running "$canary"; then ok "identity: if the owner changes after SIGTERM, while polling, the library does not escalate (one TERM, no KILL)"; else bad "identity change while polling (rc=$r, TERM=$(signals_since '-TERM') KILL=$(signals_since '-KILL')): $(cat "$fix/diag.txt")"; fi
+ps_reset; teardown_child idtest2
+
+OWNED_PROCESS_TERM_MS=100 OWNED_PROCESS_POLL_MS=20
+ps_reset; PS_FLIP_SIGNAL=TERM; PS_FLIP_CALLS=7; PS_FLIP_MODE=foreign-start   # the 7th ps call after TERM is the one made immediately before SIGKILL
+start_child idtest3 ignore; id3pid="$(op_pid idtest3)"
+diag op_stop idtest3; r=$?
+if [ "$r" -eq 1 ] && [ "$(signals_since '-TERM')" -eq 1 ] && [ "$(signals_since '-KILL')" -eq 0 ] && grep -q 'refused to send SIGKILL' "$fix/diag.txt" && only_registered_signalled "$id3pid" && running "$id3pid" && running "$canary"; then ok "identity: if the owner changes between the last poll and SIGKILL, SIGKILL is not sent (the foreign canary is untouched)"; else bad "identity change before KILL (rc=$r, TERM=$(signals_since '-TERM') KILL=$(signals_since '-KILL')): $(cat "$fix/diag.txt")"; fi
+ps_reset; teardown_child idtest3
+export OWNED_PROCESS_TERM_MS=400 OWNED_PROCESS_POLL_MS=20
+
+ps_reset; start_child idtest4 ignore; id4pid="$(op_pid idtest4)"
+diag op_stop idtest4; r=$?
+if [ "$r" -eq 1 ] && [ "$(signals_since '-KILL')" -eq 1 ] && only_registered_signalled "$id4pid" && gone "$id4pid"; then ok "identity (control): with an unchanged identity the same TERM-ignoring child is escalated and killed"; else bad "identity control (rc=$r)"; fi
+ps_reset
 
 # 6. only TERM/KILL to positive single PIDs: no group, no name, no probe of a reaped PID
 if ! grep -Evq '^-(TERM|KILL) [0-9]+$' "$KILL_LOG" || [ ! -s "$KILL_LOG" ]; then
@@ -118,7 +179,7 @@ if ! diag op_register foreign "$foreign" && grep -q 'not a child of this shell' 
 if ! diag op_register bogus abc && ! diag op_register init 1; then ok "non-numeric PIDs and PID 1 cannot be registered"; else bad "bogus PID registered"; fi
 
 # 8. the canary (same command line as the stopped children) and the foreign process survive
-if op__running "$canary" && op__running "$foreign"; then ok "an unrelated process with an identical command line survived every stop"; else bad "an unrelated process was killed (canary running: $(op__running "$canary" && echo yes || echo no); foreign running: $(op__running "$foreign" && echo yes || echo no))"; fi
+if running "$canary" && running "$foreign"; then ok "an unrelated process with an identical command line survived every stop"; else bad "an unrelated process was killed (canary running: $(running "$canary" && echo yes || echo no); foreign running: $(running "$foreign" && echo yes || echo no))"; fi
 
 # --- harness scenarios: a real script using the helper, run as a child
 cat >"$fix/harness.sh" <<'SH'
@@ -217,7 +278,7 @@ done
 OP_WORKDIR=""
 
 # --- the canary is still alive after the harness scenarios too
-if op__running "$canary" && op__running "$foreign"; then ok "the unrelated canary survived the harness scenarios as well"; else bad "the canary did not survive"; fi
+if running "$canary" && running "$foreign"; then ok "the unrelated canary survived the harness scenarios as well"; else bad "the canary did not survive"; fi
 
 # --- static guard: the smoke harness must use the helper and have no bare wait or kill
 grep -nE '^[^#]*[[:space:]](wait|kill)[[:space:]]' scripts/mock-smoke.sh >"$fix/bare.txt" 2>/dev/null || true

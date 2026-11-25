@@ -23,6 +23,7 @@
 
 OP_NAMES=()
 OP_PIDS=()
+OP_IDS=()      # identity token per child: its start time as ps reports it ("" if it had already exited)
 OP_REAPED=()   # "1" once wait has collected the child
 OP_RESULT=()   # final status of a reaped child
 OP_TMP_ROOT=""
@@ -39,17 +40,51 @@ op__ms() { # op__ms VAR DEFAULT -> a positive integer number of milliseconds
   echo "$v"
 }
 
-# op__state PID -> prints the ps state letters, or nothing if the PID is gone.
-op__state() { ps -o stat= -p "$1" 2>/dev/null | tr -d ' '; }
+# --- observing a child: identity, not just a PID --------------------------------
+# A PID alone is not an identity: once a process has been collected the kernel can
+# hand the number to an unrelated process, and bash can collect a child before we
+# call wait, so a registry flag cannot prove the PID is still ours. Every
+# registered child therefore has an identity token (its start time as ps reports it,
+# captured at registration) and must still be a child of THIS shell. The token is
+# re-checked at every poll and immediately before each signal. Anything that does
+# not match, or cannot be established, means "do not signal" (fail closed).
 
-# op__running PID: true while the process exists and is not a zombie.
-op__running() {
-  local s
-  s="$(op__state "$1")"
-  [ -n "$s" ] && case "$s" in Z*) return 1 ;; esac
+# op__ps_fields PID: sets F_RC (ps exit status), F_PPID, F_STAT, F_START ("" if none).
+op__ps_fields() {
+  local out a b c d e f g
+  F_PPID=""; F_STAT=""; F_START=""
+  out="$(ps -o ppid= -o stat= -o lstart= -p "$1" 2>/dev/null)"; F_RC=$?
+  if [ "$F_RC" -eq 0 ]; then
+    if [ -z "$out" ]; then F_RC=98; return 0; fi    # success with no output is not an answer
+    read -r a b c d e f g <<<"$out"
+    if [ -z "$g" ]; then F_RC=97; return 0; fi      # malformed: fewer fields than ppid, stat and a 5-field start time
+    F_PPID="$a"; F_STAT="$b"; F_START="$c $d $e $f $g"
+  fi
+  return 0
 }
 
-op__ppid() { ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '; }
+# op__probe INDEX: sets PROBE to one of
+#   RUN      the registered child is alive and still ours
+#   EXITED   the registered child has exited (a zombie, or no longer in the process table)
+#   CHANGED  the PID now belongs to something that is not our child (identity differs)
+#   UNKNOWN  the state could not be established
+# and PROBE_WHY to a sentence for diagnostics.
+op__probe() {
+  local pid="${OP_PIDS[$1]}" want="${OP_IDS[$1]}"
+  PROBE=UNKNOWN; PROBE_WHY=""
+  op__ps_fields "$pid"
+  if [ "$F_RC" -eq 0 ]; then
+    if [ "$F_PPID" != "$$" ] || [ "$F_START" != "$want" ]; then
+      PROBE=CHANGED
+      PROBE_WHY="pid $pid now reports parent $F_PPID and start '$F_START'; the registered child had parent $$ and start '$want'"
+      return 0
+    fi
+    case "$F_STAT" in Z*) PROBE=EXITED ;; *) PROBE=RUN ;; esac
+    return 0
+  fi
+  if [ "$F_RC" -eq 1 ]; then PROBE=EXITED; PROBE_WHY="no process with pid $pid"; return 0; fi
+  PROBE_WHY="ps could not report on pid $pid (status $F_RC)"
+}
 
 op__index() { # op__index NAME -> prints the registry index, nonzero if unknown
   local i=0
@@ -61,72 +96,115 @@ op__index() { # op__index NAME -> prints the registry index, nonzero if unknown
 }
 
 # op_register NAME PID: record a child this shell just started (cmd & ; op_register n $!).
+# Must be called in the shell that started the child (not a subshell). Refused unless
+# the child's identity can be established.
 op_register() {
   local name="$1" pid="$2"
   case "$pid" in ''|*[!0-9]*) op_log "refusing to register '$name': '$pid' is not a PID"; return 1 ;; esac
   [ "$pid" -gt 1 ] || { op_log "refusing to register '$name': PID $pid"; return 1; }
   if op__index "$name" >/dev/null; then op_log "refusing to register '$name' twice"; return 1; fi
-  if [ "$(op__ppid "$pid")" != "$$" ]; then
-    op_log "refusing to register '$name' (pid $pid): it is not a child of this shell"
+  op__ps_fields "$pid"
+  local ident=""
+  if [ "$F_RC" -eq 0 ]; then
+    if [ "$F_PPID" != "$$" ]; then
+      op_log "refusing to register '$name' (pid $pid): it is not a child of this shell"
+      return 1
+    fi
+    ident="$F_START"
+  elif [ "$F_RC" -eq 1 ]; then
+    ident=""    # already gone: it exited before it could be registered; stopping it will report its status
+  else
+    op_log "refusing to register '$name' (pid $pid): cannot establish its identity (ps status $F_RC)"
     return 1
   fi
-  OP_NAMES+=("$name"); OP_PIDS+=("$pid"); OP_REAPED+=(""); OP_RESULT+=("")
+  OP_NAMES+=("$name"); OP_PIDS+=("$pid"); OP_IDS+=("$ident"); OP_REAPED+=(""); OP_RESULT+=("")
 }
 
-# op_alive NAME: true while the registered child is running (a zombie is not running).
+# op_alive NAME: true while the registered child is running and still ours.
 op_alive() {
   local i; i="$(op__index "$1")" || return 1
-  [ -z "${OP_REAPED[$i]}" ] && op__running "${OP_PIDS[$i]}"
+  [ -z "${OP_REAPED[$i]}" ] || return 1
+  op__probe "$i"
+  [ "$PROBE" = RUN ]
 }
 
 # op_pid NAME: print the PID of a registered child.
 op_pid() { local i; i="$(op__index "$1")" || return 1; echo "${OP_PIDS[$i]}"; }
 
-# op__wait_gone PID POLLS: poll until PID is no longer running; return 0 if it stopped.
-op__wait_gone() {
-  local pid="$1" polls="$2" poll_s n=0
+# op__signal INDEX SIGNAL: send SIGNAL to the child only if, immediately before, it
+# is established to be the registered child and alive. Returns 0 sent, 1 refused
+# (not running or not ours), 2 refused (state unknown). Nothing is sent in 1 or 2.
+op__signal() {
+  op__probe "$1"
+  case "$PROBE" in
+    RUN) ;;
+    UNKNOWN) return 2 ;;
+    *) return 1 ;;
+  esac
+  kill -"$2" "${OP_PIDS[$1]}" 2>/dev/null || true
+  return 0
+}
+
+# op__poll_exit INDEX POLLS: poll until the child has exited. Returns 0 exited,
+# 1 still running after POLLS polls, 2 identity changed or state unknown (PROBE_WHY set).
+op__poll_exit() {
+  local i="$1" polls="$2" poll_s n=0
   poll_s="$(awk -v ms="$(op__ms OWNED_PROCESS_POLL_MS 50)" 'BEGIN { printf "%.3f", ms / 1000 }')"
-  while op__running "$pid"; do
+  while :; do
+    op__probe "$i"
+    case "$PROBE" in
+      EXITED) return 0 ;;
+      RUN) ;;
+      *) return 2 ;;
+    esac
     [ "$n" -lt "$polls" ] || return 1
     sleep "$poll_s"
     n=$((n + 1))
   done
-  return 0
 }
 
 # op_stop NAME: stop one registered child as described at the top. Returns 0 only
-# for a clean exit status 0 with no escalation.
+# for a clean exit status 0 with no escalation. If the child's identity or state
+# cannot be established it signals nothing, waits for nothing, and fails.
 op_stop() {
-  local name="$1" i pid term_ms kill_ms poll_ms status=0 escalated="" rc
+  local name="$1" i pid term_ms kill_ms poll_ms status=0 escalated="" rc r
   i="$(op__index "$name")" || { op_log "cannot stop '$name': not registered"; return 2; }
   if [ -n "${OP_REAPED[$i]}" ]; then
-    # Already collected: never signal a reaped PID. Report the recorded result.
+    # Already collected by us: nothing to signal. Report the recorded result.
     [ "${OP_RESULT[$i]}" = 0 ] && return 0
     op_log "$name had already stopped with status ${OP_RESULT[$i]}"
     return 1
   fi
   pid="${OP_PIDS[$i]}"
-  if [ "$(op__ppid "$pid")" != "$$" ] && op__running "$pid"; then
-    op_log "refusing to signal $name (pid $pid): it is not a child of this shell"
-    return 1
-  fi
   poll_ms="$(op__ms OWNED_PROCESS_POLL_MS 50)"
   term_ms="$(op__ms OWNED_PROCESS_TERM_MS 10000)"
   kill_ms="$(op__ms OWNED_PROCESS_KILL_MS 5000)"
 
-  if op__running "$pid"; then
-    kill -TERM "$pid" 2>/dev/null || true
-    if ! op__wait_gone "$pid" $((term_ms / poll_ms)); then
+  op__probe "$i"
+  case "$PROBE" in
+    UNKNOWN) op_log "$name (pid $pid): cannot establish its state ($PROBE_WHY); not signalling and not waiting"; return 1 ;;
+    CHANGED) op_log "$name (pid $pid): identity changed ($PROBE_WHY); not signalling"; return 1 ;;
+  esac
+  if [ "$PROBE" = RUN ]; then
+    r=0; op__signal "$i" TERM || r=$?
+    if [ "$r" -ne 0 ] && [ "$PROBE" != EXITED ]; then
+      op_log "$name (pid $pid): refused to send SIGTERM ($PROBE_WHY); nothing was signalled"; return 1
+    fi
+    r=0; op__poll_exit "$i" $((term_ms / poll_ms)) || r=$?
+    if [ "$r" -eq 2 ]; then op_log "$name (pid $pid): lost track while waiting after SIGTERM ($PROBE_WHY); not escalating"; return 1; fi
+    if [ "$r" -eq 1 ]; then
       escalated=1
       op_log "$name (pid $pid) did not exit within ${term_ms} ms of SIGTERM; sending SIGKILL to that process"
-      kill -KILL "$pid" 2>/dev/null || true
-      if ! op__wait_gone "$pid" $((kill_ms / poll_ms)); then
-        op_log "$name (pid $pid) is still running ${kill_ms} ms after SIGKILL; leaving it unreaped"
-        return 1
+      r=0; op__signal "$i" KILL || r=$?
+      if [ "$r" -ne 0 ] && [ "$PROBE" != EXITED ]; then
+        op_log "$name (pid $pid): refused to send SIGKILL ($PROBE_WHY); nothing was signalled"; return 1
       fi
+      r=0; op__poll_exit "$i" $((kill_ms / poll_ms)) || r=$?
+      if [ "$r" -eq 1 ]; then op_log "$name (pid $pid) is still running ${kill_ms} ms after SIGKILL; leaving it unreaped"; return 1; fi
+      if [ "$r" -eq 2 ]; then op_log "$name (pid $pid): lost track after SIGKILL ($PROBE_WHY)"; return 1; fi
     fi
   fi
-  # The child has exited (a zombie, or already gone): collecting it cannot block.
+  # The child has exited (a zombie, or already collected): collecting it cannot block.
   wait "$pid" 2>/dev/null || status=$?
   OP_REAPED[$i]=1; OP_RESULT[$i]="$status"
   rc=0
