@@ -59,7 +59,6 @@ restore_context() {
 if [ "$mode" = down ]; then
   if [ -n "$exists" ]; then
     kind delete cluster --name "$name"
-    restore_context
   else
     echo "kind cluster '$name' does not exist; nothing to do."
   fi
@@ -68,6 +67,9 @@ fi
 
 # --- up
 work="$(mktemp -d "${TMPDIR:-/tmp}/kind-cluster.XXXXXX")"
+# The EXIT trap puts the previous current context back on EVERY path of `up`
+# (success, refusal, failure). `down` needs no restore: kind only removes the
+# deleted cluster's own context entries.
 trap 'restore_context; case "$work" in "${TMPDIR:-/tmp}"/kind-cluster.*) rm -rf -- "$work" ;; esac' EXIT
 command -v go >/dev/null 2>&1 || die "go not found (it builds the topology checker)."
 if [ -n "${KINDSHAPE_BIN:-}" ]; then
@@ -100,7 +102,6 @@ if [ -n "$exists" ]; then
   if ! kubectl config get-contexts -o name 2>/dev/null | grep -qx -- "$ctx"; then
     echo "kind-cluster: cluster '$name' exists but kubeconfig has no context '$ctx'; exporting it."
     kind export kubeconfig --name "$name"
-    restore_context
   fi
   rc=0; check_shape || rc=$?
   if [ "$rc" -eq 0 ]; then
@@ -113,7 +114,6 @@ if [ -n "$exists" ]; then
 fi
 
 kind create cluster --name "$name" --config "$KIND_CONFIG"
-restore_context
 rc=0; check_shape || rc=$?
 [ "$rc" -eq 0 ] || die "the new cluster '$name' does not match the supported topology (see above); it was left in place for inspection."
 echo "kind cluster '$name' created; kubectl context '$ctx' (current context left as '${prior:-<none>}')."
