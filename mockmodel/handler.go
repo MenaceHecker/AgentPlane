@@ -389,10 +389,18 @@ func decodeMessages(raw json.RawMessage, dst *[]Message) error {
 			}
 		}
 		if len(members) != 2 {
+			// Report the lexicographically first unknown member: ranging over the
+			// map would name a different one on different runs, and the error body
+			// of one request must be byte-identical every time.
+			unknown := make([]string, 0, len(members))
 			for k := range members {
 				if k != "role" && k != "content" {
-					return fmt.Errorf("messages[%d] has an unknown field %q", i, k)
+					unknown = append(unknown, k)
 				}
+			}
+			if len(unknown) > 0 {
+				sort.Strings(unknown)
+				return fmt.Errorf("messages[%d] has an unknown field %q", i, unknown[0])
 			}
 		}
 		msgs = append(msgs, m)
