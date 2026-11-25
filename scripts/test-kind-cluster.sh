@@ -51,7 +51,8 @@ case "$1 $2" in
   "delete cluster")
     n="$(name "$@")"; grep -vx -- "$n" "$ST/clusters" >"$ST/c.tmp"; mv "$ST/c.tmp" "$ST/clusters"
     grep -vx -- "kind-$n" "$ST/contexts" >"$ST/x.tmp"; mv "$ST/x.tmp" "$ST/contexts"
-    if [ "$(cat "$ST/current")" = "kind-$n" ]; then : >"$ST/current"; fi ;;
+    if [ "$(cat "$ST/current")" = "kind-$n" ]; then : >"$ST/current"; fi
+    if [ -n "${STUB_DELETE_SWITCH:-}" ]; then echo "$STUB_DELETE_SWITCH" >"$ST/current"; fi ;;   # a misbehaving kind that switches context
   "export kubeconfig")
     n="$(name "$@")"; echo "kind-$n" >>"$ST/contexts"; echo "kind-$n" >"$ST/current" ;;
   *) echo "stub kind: unexpected: $*" >&2; exit 99 ;;
@@ -64,8 +65,12 @@ case "$1" in
   config)
     case "$2" in
       current-context) [ -s "$ST/current" ] && cat "$ST/current" || { echo "error: current-context is not set" >&2; exit 1; } ;;
-      use-context) echo "$3" >"$ST/current" ;;
-      unset) if [ "$3" = current-context ]; then : >"$ST/current"; fi ;;
+      use-context)
+        if [ -n "${STUB_USECONTEXT_FAIL:-}" ]; then echo "error: no context exists with the name: \"$3\"" >&2; exit 1; fi
+        if [ -z "${STUB_USECONTEXT_NOOP:-}" ]; then echo "$3" >"$ST/current"; fi ;;   # NOOP: claims success but changes nothing
+      unset)
+        if [ -n "${STUB_UNSET_FAIL:-}" ]; then echo "error: could not unset" >&2; exit 1; fi
+        if [ "$3" = current-context ]; then : >"$ST/current"; fi ;;
       get-contexts) cat "$ST/contexts" ;;
       *) echo "stub kubectl: unexpected config $*" >&2; exit 99 ;;
     esac ;;
@@ -110,7 +115,7 @@ reset() { # reset PRIOR_CONTEXT CLUSTERS...
   : >"$ST/log"; : >"$ST/violations"; : >"$ST/clusters"; : >"$ST/contexts"; : >"$ST/current"
   [ -z "$prior" ] || { echo "$prior" >"$ST/current"; echo "$prior" >"$ST/contexts"; }
   local c; for c in "$@"; do echo "$c" >>"$ST/clusters"; echo "kind-$c" >>"$ST/contexts"; done
-  unset STUB_DOCKER_DOWN STUB_KIND_VERSION STUB_GET_CLUSTERS_FAIL STUB_GETNODES_FAIL KIND_CONFIG
+  unset STUB_DOCKER_DOWN STUB_KIND_VERSION STUB_GET_CLUSTERS_FAIL STUB_GETNODES_FAIL KIND_CONFIG STUB_USECONTEXT_FAIL STUB_USECONTEXT_NOOP STUB_UNSET_FAIL STUB_DELETE_SWITCH
   export STUB_NODES="$fix/nodes-good.json"
 }
 run() { # run MODE NAME -> OUT, RC
@@ -161,6 +166,28 @@ if [ $RC -eq 0 ] && [ -z "$(cur)" ]; then ok "with no prior kubectl context, non
 
 reset "$PRIOR" agentplane-t; echo "$PRIOR" >"$ST/contexts"; run up agentplane-t
 if [ $RC -eq 0 ] && [ "$(count 'kind export kubeconfig --name agentplane-t')" -eq 1 ] && [ "$(count 'kind create')" -eq 0 ] && [ "$(cur)" = "$PRIOR" ]; then ok "an existing cluster missing from kubeconfig is exported, the prior context restored, nothing recreated"; else bad "export path (rc=$RC, current=$(cur)): $OUT"; fi
+
+# --- restoring the current context must be verified, and a failure must fail the operation (review r1, finding 4)
+reset "$PRIOR"; export STUB_USECONTEXT_FAIL=1; run up agentplane-t
+if [ $RC -ne 0 ] && [ "$(count 'kind create')" -eq 1 ] && printf '%s' "$OUT" | grep -q "could not restore your kubectl current context: it was '$PRIOR' and it is now 'kind-agentplane-t'" && ! printf '%s' "$OUT" | grep -q '(verified)' && ! printf '%s' "$OUT" | grep -q 'left as'; then ok "a failed use-context after create fails the run (rc=$RC) and reports the actual current context; no preservation is claimed"; else bad "failed restore after create (rc=$RC): $OUT"; fi
+reset "$PRIOR" agentplane-t; echo "$PRIOR" >"$ST/contexts"; export STUB_USECONTEXT_FAIL=1; run up agentplane-t
+if [ $RC -ne 0 ] && [ "$(count 'kind export kubeconfig')" -eq 1 ] && [ "$(count 'kind create')" -eq 0 ] && printf '%s' "$OUT" | grep -q "it is now 'kind-agentplane-t'"; then ok "a failed use-context after export fails the run and reports the actual current context"; else bad "failed restore after export (rc=$RC): $OUT"; fi
+reset "$PRIOR"; export STUB_USECONTEXT_NOOP=1; run up agentplane-t
+if [ $RC -ne 0 ] && printf '%s' "$OUT" | grep -q 'could not restore'; then ok "a use-context that claims success but changes nothing is caught by verifying the result"; else bad "lying use-context (rc=$RC): $OUT"; fi
+reset ""; export STUB_UNSET_FAIL=1; run up agentplane-t
+if [ $RC -ne 0 ] && printf '%s' "$OUT" | grep -q "it was '<none>' and it is now 'kind-agentplane-t'"; then ok "a failed unset of the current context (none before) fails the run and reports what remains"; else bad "failed unset (rc=$RC): $OUT"; fi
+reset "$PRIOR"; run up agentplane-t
+if [ $RC -eq 0 ] && printf '%s' "$OUT" | grep -q "your kubectl current context is '$PRIOR' (verified)" && [ "$(cur)" = "$PRIOR" ]; then ok "on success the verified current context is reported"; else bad "success message (rc=$RC): $OUT"; fi
+reset "$PRIOR" agentplane-t; echo "$PRIOR" >"$ST/contexts"; export STUB_USECONTEXT_FAIL=1 STUB_NODES="$fix/nodes-single.json"; run up agentplane-t
+if [ $RC -ne 0 ] && printf '%s' "$OUT" | grep -q 'was NOT changed' && printf '%s' "$OUT" | grep -q 'could not restore your kubectl current context'; then ok "an earlier failure (incompatible cluster) is preserved and the restore failure is reported as well"; else bad "preserve earlier failure (rc=$RC): $OUT"; fi
+reset "$PRIOR" agentplane-t; export STUB_USECONTEXT_FAIL=1; run up agentplane-t
+if [ $RC -eq 0 ] && [ "$(count 'use-context')" -eq 0 ]; then ok "when nothing changed the context, a failing use-context is never needed or called"; else bad "idempotent run with failing use-context (rc=$RC): $OUT"; fi
+reset "kind-agentplane-x" agentplane-x; run down agentplane-x
+if [ $RC -eq 0 ] && [ -z "$(cur)" ] && printf '%s' "$OUT" | grep -q "current context is '<none>' (verified)"; then ok "down of the cluster that was the current context leaves none, verified, with nothing to restore to"; else bad "down of the current cluster (rc=$RC, current='$(cur)'): $OUT"; fi
+reset "$PRIOR" agentplane-x; export STUB_DELETE_SWITCH=some-other-context; run down agentplane-x
+if [ $RC -eq 0 ] && [ "$(cur)" = "$PRIOR" ]; then ok "down restores the prior context if kind switched it"; else bad "down restore (rc=$RC, current='$(cur)'): $OUT"; fi
+reset "$PRIOR" agentplane-x; export STUB_DELETE_SWITCH=some-other-context STUB_USECONTEXT_FAIL=1; run down agentplane-x
+if [ $RC -ne 0 ] && printf '%s' "$OUT" | grep -q "it is now 'some-other-context'"; then ok "down fails and reports the actual context if the switched context cannot be restored"; else bad "down failed restore (rc=$RC): $OUT"; fi
 
 names_ok=1
 for badname in "" "Agent" "a;b" "-a" "a-" "a b" 'a$(id)' "a/b"; do

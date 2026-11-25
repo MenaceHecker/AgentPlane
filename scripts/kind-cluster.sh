@@ -45,20 +45,51 @@ if printf '%s\n' "$clusters" | grep -qx -- "$name"; then exists=1; fi
 
 # The current kubectl context before we touch anything (local file read only).
 prior="$(kubectl config current-context 2>/dev/null || true)"
+want="$prior"   # the current context this run must leave behind
+work=""
+
+# restore_context: make the current context exactly $want again, and VERIFY it. Returns 0
+# only if it is; otherwise it says what the current context really is and returns 1.
 restore_context() {
-  local now
+  local now err=""
   now="$(kubectl config current-context 2>/dev/null || true)"
-  [ "$now" != "$prior" ] || return 0
-  if [ -n "$prior" ]; then
-    kubectl config use-context "$prior" >/dev/null 2>&1 || echo "kind-cluster: WARNING: could not restore the kubectl context '$prior'; it is now '$now'." >&2
+  [ "$now" != "$want" ] || return 0
+  if [ -n "$want" ]; then
+    err="$(kubectl config use-context "$want" 2>&1 >/dev/null)" || true
   else
-    kubectl config unset current-context >/dev/null 2>&1 || true
+    err="$(kubectl config unset current-context 2>&1 >/dev/null)" || true
   fi
+  now="$(kubectl config current-context 2>/dev/null || true)"   # trust the result, not the exit status
+  [ "$now" != "$want" ] || return 0
+  echo "kind-cluster: ERROR: could not restore your kubectl current context: it was '${want:-<none>}' and it is now '${now:-<none>}'${err:+ ($err)}." >&2
+  if [ -n "$want" ]; then echo "  Restore it yourself: kubectl config use-context '$want'" >&2
+  else echo "  Unset it yourself: kubectl config unset current-context" >&2; fi
+  return 1
 }
+
+# One exit path for success, refusal and failure, in both modes: restore and verify the
+# context, remove only our temp dir, keep an earlier failure's status, and fail an
+# otherwise successful run if the context could not be restored.
+finish() {
+  local rc=$? rrc=0 now
+  trap - EXIT
+  restore_context || rrc=1
+  case "$work" in "${TMPDIR:-/tmp}"/kind-cluster.*) rm -rf -- "$work" ;; esac
+  if [ "$rrc" -ne 0 ] && [ "$rc" -eq 0 ]; then rc=1; fi
+  if [ "$rc" -eq 0 ]; then
+    now="$(kubectl config current-context 2>/dev/null || true)"
+    echo "kind-cluster: your kubectl current context is '${now:-<none>}' (verified)."
+  fi
+  exit "$rc"
+}
+trap finish EXIT
 
 if [ "$mode" = down ]; then
   if [ -n "$exists" ]; then
     kind delete cluster --name "$name"
+    # Deleting a cluster also removes its own context entries, so if that was the current
+    # context there is nothing to go back to; any other current context must be unchanged.
+    if [ "$prior" = "$ctx" ]; then want=""; fi
   else
     echo "kind cluster '$name' does not exist; nothing to do."
   fi
@@ -67,10 +98,6 @@ fi
 
 # --- up
 work="$(mktemp -d "${TMPDIR:-/tmp}/kind-cluster.XXXXXX")"
-# The EXIT trap puts the previous current context back on EVERY path of `up`
-# (success, refusal, failure). `down` needs no restore: kind only removes the
-# deleted cluster's own context entries.
-trap 'restore_context; case "$work" in "${TMPDIR:-/tmp}"/kind-cluster.*) rm -rf -- "$work" ;; esac' EXIT
 command -v go >/dev/null 2>&1 || die "go not found (it builds the topology checker)."
 if [ -n "${KINDSHAPE_BIN:-}" ]; then
   shape="$KINDSHAPE_BIN"
@@ -116,4 +143,4 @@ fi
 kind create cluster --name "$name" --config "$KIND_CONFIG"
 rc=0; check_shape || rc=$?
 [ "$rc" -eq 0 ] || die "the new cluster '$name' does not match the supported topology (see above); it was left in place for inspection."
-echo "kind cluster '$name' created; kubectl context '$ctx' (current context left as '${prior:-<none>}')."
+echo "kind cluster '$name' created; use it with: kubectl --context $ctx ..."
