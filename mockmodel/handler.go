@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -303,7 +304,9 @@ func decodeRequest(body []byte) (*ChatRequest, error) {
 			err = decodeMessages(raw, &req.Messages)
 		case "max_tokens":
 			var n int64
-			if err = decodeMember(raw, &n, "max_tokens"); err == nil {
+			if isNull(raw) {
+				err = errors.New("max_tokens must not be null")
+			} else if n, err = parseMaxTokens(raw); err == nil {
 				req.MaxTokens = &n
 			}
 		case "temperature":
@@ -339,6 +342,64 @@ func decodeRequest(body []byte) (*ChatRequest, error) {
 		return nil, err
 	}
 	return &req, nil
+}
+
+// parseMaxTokens parses the JSON number text of max_tokens exactly. The contract
+// declares an integer, and JSON Schema accepts every spelling of an integral
+// number (5, 5.0, 5e0, 0.5e1, 500e-2), so the text is expanded as a decimal
+// instead of being passed to a float or an int64 decoder: nothing is rounded, a
+// fractional value is rejected, and equivalent spellings give the same int64
+// (and therefore the same request identity and response). The work is linear in
+// the text length whatever the exponent, so 1e999999999 is refused quickly.
+func parseMaxTokens(raw json.RawMessage) (int64, error) {
+	bad := fmt.Errorf("max_tokens must be an integer between 1 and %d", maxSafeInteger)
+	s := string(bytes.TrimSpace(raw))
+	if s == "" || (s[0] != '-' && (s[0] < '0' || s[0] > '9')) {
+		return 0, errors.New("max_tokens has the wrong type: it must be an integer")
+	}
+	neg := s[0] == '-'
+	s = strings.TrimPrefix(s, "-")
+	var exp int64
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		e, err := strconv.ParseInt(s[i+1:], 10, 64) // accepts a sign
+		if err != nil {
+			// out of int64 range: any such exponent is far beyond what matters
+			e = 1 << 40
+			if strings.HasPrefix(s[i+1:], "-") {
+				e = -e
+			}
+		}
+		exp, s = e, s[:i]
+	}
+	intPart, frac, _ := strings.Cut(s, ".")
+	digits := strings.TrimLeft(intPart+frac, "0")
+	scale := int64(len(frac)) - exp // value = digits / 10^scale
+	switch {
+	case digits == "":
+		return 0, bad // zero (any spelling) is below the minimum
+	case scale > 0:
+		if scale >= int64(len(digits)) {
+			return 0, bad // a nonzero value below one is not an integer
+		}
+		cut := len(digits) - int(scale)
+		if strings.Trim(digits[cut:], "0") != "" {
+			return 0, bad // a nonzero fractional part
+		}
+		digits = digits[:cut]
+	case scale < 0:
+		if int64(len(digits))-scale > 16 { // more digits than 2^53-1 has
+			return 0, bad
+		}
+		digits += strings.Repeat("0", int(-scale))
+	}
+	if len(digits) > 16 || neg {
+		return 0, bad
+	}
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || n < 1 || n > maxSafeInteger {
+		return 0, bad
+	}
+	return n, nil
 }
 
 // decodeMember decodes one member into dst with its exact type. A JSON null is
