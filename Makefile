@@ -7,6 +7,9 @@ SHELL := /bin/bash
 GOLANGCI_LINT_VERSION ?= 2.15.0
 GITLEAKS_VERSION ?= 8.30.1
 KIND_VERSION ?= 0.31.0
+# Trivy. Not named TRIVY_*: Trivy reads TRIVY_* environment variables as flags.
+IMAGE_SCANNER_VERSION ?= 0.76.2
+MOCK_IMAGE ?= agentplane/mockmodel:p0
 export GOLANGCI_LINT_VERSION GITLEAKS_VERSION KIND_VERSION
 
 # Local kind cluster name. Only this named cluster is ever created or deleted.
@@ -54,6 +57,20 @@ mock-run: ## Run the deterministic mock model on loopback (Ctrl-C to stop; MOCK_
 .PHONY: mock-smoke
 mock-smoke: ## Start a disposable mock model, check determinism and streaming, stop it (needs go, curl, python3)
 	@scripts/mock-smoke.sh
+
+.PHONY: mock-image
+mock-image: ## Build the nonroot local mock model image (agentplane/mockmodel:p0; needs Docker; pushes nothing)
+	@command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found." >&2; exit 1; }
+	@docker info >/dev/null 2>&1 || { echo "ERROR: the Docker daemon is not reachable. Start Docker and retry." >&2; exit 1; }
+	docker build --provenance=false --sbom=false -f mockmodel/Dockerfile -t '$(MOCK_IMAGE)' .
+
+.PHONY: mock-image-scan
+mock-image-scan: ## Scan the mock image with pinned Trivy; fail on fixable HIGH/CRITICAL (needs network for the database)
+	@SCAN_TRIVY_VERSION='$(IMAGE_SCANNER_VERSION)' scripts/scan-mock-image.sh '$(MOCK_IMAGE)'
+
+.PHONY: image-scan-test
+image-scan-test: ## Test the image scan gate with fixture reports and stub tools (no Docker, no network)
+	@scripts/test-image-scan.sh
 
 .PHONY: smoke-cleanup-test
 smoke-cleanup-test: ## Test the owned-process helper used by mock-smoke (needs bash and python3)
