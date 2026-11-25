@@ -78,6 +78,10 @@ jobs:
       # signal cleanup, and that unrelated processes survive.
       - name: make smoke-cleanup-test
         run: make smoke-cleanup-test
+      # Make variables must reach the scripts as data: quotes, substitutions and
+      # metacharacters in a value execute nothing (logging stubs, no real tools).
+      - name: make make-args-test
+        run: make make-args-test
       # Kind topology, node-shape checks and cluster targeting, with stub tools:
       # no Docker, no cluster and no network.
       - name: make kind-config-test

@@ -29,6 +29,14 @@ evidence="${evidence%/}"
 err() { echo "image-scan: ERROR: $*" >&2; exit 2; }
 
 [ -n "$pin" ] || err "SCAN_TRIVY_VERSION is not set; refusing to scan with an unpinned scanner."
+# The image reference is data from the caller: accept only a plain reference (no leading '-', no
+# whitespace, quotes, substitutions or other metacharacters) before it reaches any tool.
+case "$image" in
+  ""|-*|*[!A-Za-z0-9._/:@-]*) err "refusing the image reference '$image': it must be a plain reference such as name:tag." ;;
+esac
+case "$pin" in
+  *[!0-9.]*|"") err "refusing the scanner version '$pin': it must be digits and dots." ;;
+esac
 for tool in docker trivy python3; do
   command -v "$tool" >/dev/null 2>&1 || err "$tool not found. See docs/local-development.md for the pinned install."
 done
