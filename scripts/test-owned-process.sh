@@ -27,6 +27,15 @@ cleanup() {
     now="$(command ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ')"
     if [ -n "$want" ] && [ "$now" = "$want" ]; then builtin kill -KILL "$p" 2>/dev/null || true; fi
   done
+  # Children started INSIDE the harness scenarios are recorded by the harness in childpid files.
+  # If a (mutated) helper failed to stop them they are orphans: kill one only if it is still the
+  # fixture child process (its command line names this run's child.py).
+  for e in "$fix"/h-*/childpid; do
+    [ -f "$e" ] || continue
+    p="$(cat "$e" 2>/dev/null)"
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    case "$(command ps -o command= -p "$p" 2>/dev/null)" in *"$fix/child.py"*) builtin kill -KILL "$p" 2>/dev/null || true ;; esac
+  done
   case "$fix" in "${TMPDIR:-/tmp}"/owned-process-test.*) rm -rf -- "$fix" ;; esac
 }
 trap cleanup EXIT
