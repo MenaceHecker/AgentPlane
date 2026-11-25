@@ -63,26 +63,51 @@ op__ps_fields() {
   return 0
 }
 
+# op__in_jobs MODE PID: is PID in this shell's job table? MODE "-r" = running jobs only,
+# "-p" = all jobs. The table is the shell's own record of the children IT started and
+# has not yet collected, so a recycled PID cannot appear in it and a failing or lying ps
+# cannot change it. Returns 0 listed, 1 not listed, 2 the table could not be read.
+# Only meaningful in the shell that started the children (not in a subshell).
+op__in_jobs() {
+  local list
+  list="$(jobs "$1" -p 2>/dev/null)" || return 2
+  case " $(echo $list) " in *" $2 "*) return 0 ;; *) return 1 ;; esac
+}
+
 # op__probe INDEX: sets PROBE to one of
-#   RUN      the registered child is alive and still ours
-#   EXITED   the registered child has exited (a zombie, or no longer in the process table)
+#   RUN      the registered child is alive and still ours (ps and the job table agree)
+#   EXITED   the registered child has exited (a zombie, or gone from both ps and the job table)
 #   CHANGED  the PID now belongs to something that is not our child (identity differs)
-#   UNKNOWN  the state could not be established
-# and PROBE_WHY to a sentence for diagnostics.
+#   UNKNOWN  the state could not be established, or the two sources disagree
+# and PROBE_WHY to a sentence for diagnostics. Only EXITED allows a wait, and only
+# RUN allows a signal.
 op__probe() {
-  local pid="${OP_PIDS[$1]}" want="${OP_IDS[$1]}"
+  local pid="${OP_PIDS[$1]}" want="${OP_IDS[$1]}" jr
   PROBE=UNKNOWN; PROBE_WHY=""
   op__ps_fields "$pid"
+  op__in_jobs -r "$pid"; jr=$?
+  if [ "$jr" -eq 2 ]; then PROBE_WHY="this shell's job table could not be read"; return 0; fi
   if [ "$F_RC" -eq 0 ]; then
     if [ "$F_PPID" != "$$" ] || [ "$F_START" != "$want" ]; then
+      if [ "$jr" -eq 0 ]; then
+        PROBE_WHY="ps says pid $pid belongs to another process (parent $F_PPID, start '$F_START') but the job table lists our child as running"
+        return 0
+      fi
       PROBE=CHANGED
       PROBE_WHY="pid $pid now reports parent $F_PPID and start '$F_START'; the registered child had parent $$ and start '$want'"
       return 0
     fi
-    case "$F_STAT" in Z*) PROBE=EXITED ;; *) PROBE=RUN ;; esac
+    case "$F_STAT" in
+      Z*) PROBE=EXITED; PROBE_WHY="zombie" ;;
+      *)
+        if [ "$jr" -eq 0 ]; then PROBE=RUN; else PROBE_WHY="ps shows pid $pid running but the job table says it has finished"; fi ;;
+    esac
     return 0
   fi
-  if [ "$F_RC" -eq 1 ]; then PROBE=EXITED; PROBE_WHY="no process with pid $pid"; return 0; fi
+  if [ "$F_RC" -eq 1 ]; then
+    if [ "$jr" -eq 0 ]; then PROBE_WHY="ps reports no process $pid but the job table lists it as running"; return 0; fi
+    PROBE=EXITED; PROBE_WHY="no process with pid $pid"; return 0
+  fi
   PROBE_WHY="ps could not report on pid $pid (status $F_RC)"
 }
 
@@ -115,6 +140,11 @@ op_register() {
     ident=""    # already gone: it exited before it could be registered; stopping it will report its status
   else
     op_log "refusing to register '$name' (pid $pid): cannot establish its identity (ps status $F_RC)"
+    return 1
+  fi
+  op__in_jobs -p "$pid"; local jr=$?
+  if [ "$jr" -ne 0 ]; then
+    op_log "refusing to register '$name' (pid $pid): it is not in this shell's job table (not started with & by this shell, or the table is unreadable)"
     return 1
   fi
   OP_NAMES+=("$name"); OP_PIDS+=("$pid"); OP_IDS+=("$ident"); OP_REAPED+=(""); OP_RESULT+=("")
@@ -210,6 +240,8 @@ op_stop() {
   rc=0
   if [ -n "$escalated" ]; then
     op_log "$name (pid $pid) was killed after ignoring SIGTERM (status $status)"; rc=1
+  elif [ "$status" -eq 127 ]; then
+    op_log "$name (pid $pid) exited but its exit status could not be collected"; rc=1
   elif [ "$status" -ne 0 ]; then
     op_log "$name (pid $pid) exited with status $status, want 0"; rc=1
   fi

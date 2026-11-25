@@ -15,10 +15,18 @@ fix="$(mktemp -d "${TMPDIR:-/tmp}/owned-process-test.XXXXXX")"
 failed=0
 ok()  { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; failed=$((failed + 1)); }
-canary_pids=()
+# Fixture processes are tracked with their start time and killed at exit only if that
+# start time still matches, so cleanup can never signal a recycled PID. This runs even
+# when assertions fail, so a failing run leaves nothing behind.
+tracked=()
+track_pid() { tracked+=("$1|$(command ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ')"); }
 cleanup() {
-  local p
-  for p in ${canary_pids[@]+"${canary_pids[@]}"}; do kill -KILL "$p" 2>/dev/null || true; done
+  local e p want now
+  for e in ${tracked[@]+"${tracked[@]}"}; do
+    p="${e%%|*}"; want="${e#*|}"
+    now="$(command ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ')"
+    if [ -n "$want" ] && [ "$now" = "$want" ]; then builtin kill -KILL "$p" 2>/dev/null || true; fi
+  done
   case "$fix" in "${TMPDIR:-/tmp}"/owned-process-test.*) rm -rf -- "$fix" ;; esac
 }
 trap cleanup EXIT
@@ -54,7 +62,9 @@ gone() { [ -z "$(command ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')" ]; }   # 
 
 start_child() { # start_child NAME MODE -> registers NAME; waits until the child is up
   python3 -I "$fix/child.py" "$2" >"$fix/$1.out" 2>&1 &
-  op_register "$1" "$!" || return 1
+  local started=$!
+  track_pid "$started"
+  op_register "$1" "$started" || return 1
   case "$2" in exit0|exit5) return 0 ;; esac
   local n=0
   until grep -q '^up$' "$fix/$1.out" 2>/dev/null; do
@@ -66,7 +76,7 @@ diag() { "$@" 2>"$fix/diag.txt"; local rc=$?; return $rc; }
 
 # --- the unrelated canary: same command line as the term0 children below
 python3 -I "$fix/child.py" term0 >"$fix/canary.out" 2>&1 &
-canary=$!; canary_pids+=("$canary"); disown "$canary" 2>/dev/null || true
+canary=$!; track_pid "$canary"; disown "$canary" 2>/dev/null || true
 n=0; until grep -q '^up$' "$fix/canary.out" 2>/dev/null; do n=$((n + 1)); [ "$n" -le 200 ] || break; sleep 0.05; done
 
 # 1. normal exit
@@ -125,6 +135,7 @@ ps() {
     fail) return 2 ;;
     empty) return 0 ;;
     absent) return 1 ;;
+    foreign-any) echo " 1 Ss Mon Jan  1 00:00:00 1999" ;;   # some other process now holds the PID
     foreign-start|foreign-ppid)
       out="$(command ps "$@")"; rc=$?
       [ "$rc" -eq 0 ] || return "$rc"
@@ -145,8 +156,18 @@ ps_reset
 start_child idtest1 ignore; id1pid="$(op_pid idtest1)"
 PS_MODE=foreign-ppid   # from now on ps reports that our child belongs to someone else
 diag op_stop idtest1; r=$?
-if [ "$r" -eq 1 ] && grep -q 'identity changed' "$fix/diag.txt" && [ "$(signals_since '^-')" -eq 0 ] && running "$id1pid" && running "$canary"; then ok "identity: a PID that is no longer reported as our child is never signalled (no TERM, no KILL)"; else bad "identity at first probe (rc=$r, signals=$(signals_since '^-')): $(cat "$fix/diag.txt")"; fi
+if [ "$r" -eq 1 ] && grep -q 'cannot establish its state' "$fix/diag.txt" && grep -q 'job table lists our child as running' "$fix/diag.txt" && [ "$(signals_since '^-')" -eq 0 ] && running "$id1pid" && running "$canary"; then ok "identity: ps claiming another owner for a child the job table says is running is refused (no TERM, no KILL, no wait)"; else bad "identity at first probe (rc=$r, signals=$(signals_since '^-')): $(cat "$fix/diag.txt")"; fi
 ps_reset; teardown_child idtest1
+
+# PID reuse model: our child really exited and was collected by bash; ps now shows an unrelated process at that PID
+ps_reset
+python3 -I "$fix/child.py" exit0 >/dev/null 2>&1 &
+reuse_pid=$!; op_register idtest1b "$reuse_pid" || bad "could not register the short-lived child"
+sleep 0.4   # the child has exited by now and bash has collected it
+PS_MODE=foreign-any
+diag op_stop idtest1b; r=$?
+if [ "$r" -eq 1 ] && grep -q 'identity changed' "$fix/diag.txt" && [ "$(signals_since '^-')" -eq 0 ]; then ok "identity: once our child has exited, an unrelated process holding its PID is detected as a changed identity (no signal, no wait)"; else bad "PID reuse model (rc=$r, signals=$(signals_since '^-')): $(cat "$fix/diag.txt")"; fi
+ps_reset; OP_REAPED[$(op__index idtest1b)]=1; OP_RESULT[$(op__index idtest1b)]=0
 
 ps_reset; PS_FLIP_SIGNAL=TERM; PS_FLIP_CALLS=2; PS_FLIP_MODE=foreign-start
 start_child idtest2 ignore; id2pid="$(op_pid idtest2)"
@@ -167,6 +188,39 @@ diag op_stop idtest4; r=$?
 if [ "$r" -eq 1 ] && [ "$(signals_since '-KILL')" -eq 1 ] && only_registered_signalled "$id4pid" && gone "$id4pid"; then ok "identity (control): with an unchanged identity the same TERM-ignoring child is escalated and killed"; else bad "identity control (rc=$r)"; fi
 ps_reset
 
+# 5d. observation failures (review r1, finding 2). When the library cannot establish a child's state it
+#     must signal nothing, WAIT FOR NOTHING and fail with a diagnostic, never claim success. The child is
+#     long-lived (it would run 600 s). An outer watchdog, which belongs to the test, kills only that child
+#     after 6 s so a regression to an unbounded wait shows up as a failed assertion instead of a hang.
+WATCHDOG_FILE="$fix/watchdog-fired"
+watchdog_start() { rm -f "$WATCHDOG_FILE"; ( sleep "$2"; if command ps -p "$1" >/dev/null 2>&1; then echo fired >"$WATCHDOG_FILE"; builtin kill -KILL "$1" 2>/dev/null; fi ) >/dev/null 2>&1 & WD=$!; disown "$WD" 2>/dev/null || true; }
+watchdog_stop() { builtin kill "$WD" 2>/dev/null || true; }
+observe_case() { # observe_case LABEL WANT_TEXT -- runs op_stop on a fresh long-lived child under the current ps/jobs setup
+  local label="$1" want="$2" pid t0 r elapsed
+  start_child obs term0; pid="$(op_pid obs)"
+  eval "$3"   # arm the failure (PS_MODE=..., or a jobs function)
+  watchdog_start "$pid" 6
+  t0=$SECONDS; diag op_stop obs; r=$?; elapsed=$((SECONDS - t0))
+  watchdog_stop
+  local fired=""; [ -e "$WATCHDOG_FILE" ] && fired=1
+  if [ "$r" -eq 1 ] && [ -z "$fired" ] && [ "$elapsed" -le 3 ] && [ "$(signals_since '^-')" -eq 0 ] && grep -q -- "$want" "$fix/diag.txt" && running "$pid" && running "$canary"; then
+    ok "observation failure ($label): returns failure in $elapsed s, sends no signal, does not wait, leaves the child alone"
+  else
+    bad "observation failure ($label): rc=$r elapsed=${elapsed}s watchdog_fired=${fired:-no} signals=$(signals_since '^-'): $(cat "$fix/diag.txt")"
+  fi
+  PS_MODE=normal; unset -f jobs 2>/dev/null; ps_reset; teardown_child obs; OP_NAMES[$(op__index obs)]="obs-done-$RANDOM"
+}
+ps_reset; observe_case "ps fails with status 2" "cannot establish its state" 'ps_reset; PS_MODE=fail'
+ps_reset; observe_case "ps succeeds with no output" "cannot establish its state" 'ps_reset; PS_MODE=empty'
+ps_reset; observe_case "ps reports no such process for a live child" "job table lists it as running" 'ps_reset; PS_MODE=absent'
+ps_reset; observe_case "the job table cannot be read" "job table could not be read" 'ps_reset; jobs() { return 1; }'
+ps_reset; observe_case "the job table claims the live child finished" "job table says it has finished" 'ps_reset; jobs() { return 0; }'
+
+ps_reset; PS_MODE=fail
+python3 -I "$fix/child.py" term0 >/dev/null 2>&1 & blind_pid=$!
+if ! diag op_register blind "$blind_pid" && grep -q 'cannot establish its identity' "$fix/diag.txt"; then ok "a child whose identity cannot be established is not registered"; else bad "registered a child without an identity: $(cat "$fix/diag.txt")"; fi
+builtin kill -KILL "$blind_pid" 2>/dev/null; wait "$blind_pid" 2>/dev/null; ps_reset
+
 # 6. only TERM/KILL to positive single PIDs: no group, no name, no probe of a reaped PID
 if ! grep -Evq '^-(TERM|KILL) [0-9]+$' "$KILL_LOG" || [ ! -s "$KILL_LOG" ]; then
   [ -s "$KILL_LOG" ] && ok "every signal sent was -TERM or -KILL to one positive PID (never a group)" || bad "no signals were recorded"
@@ -174,7 +228,7 @@ else bad "an unexpected kill invocation: $(grep -Ev '^-(TERM|KILL) [0-9]+$' "$KI
 
 # 7. unknown and non-child registrations are refused
 if diag op_stop nosuch; [ $? -eq 2 ]; then ok "stopping an unregistered name is refused (status 2)"; else bad "unregistered stop was not refused"; fi
-foreign="$( ( sleep 600 >/dev/null 2>&1 & echo $! ) )"; canary_pids+=("$foreign") # stdio redirected so $(...) returns at once
+foreign="$( ( sleep 600 >/dev/null 2>&1 & echo $! ) )"; track_pid "$foreign" # stdio redirected so $(...) returns at once
 if ! diag op_register foreign "$foreign" && grep -q 'not a child of this shell' "$fix/diag.txt"; then ok "a process that is not our child cannot be registered"; else bad "a non-child was registered"; fi
 if ! diag op_register bogus abc && ! diag op_register init 1; then ok "non-numeric PIDs and PID 1 cannot be registered"; else bad "bogus PID registered"; fi
 
@@ -204,6 +258,11 @@ case "$1" in
     python3 -I "$HARNESS_CHILD" term0 >"$OP_WORKDIR/c.out" 2>&1 & op_register c "$!"
     echo "$!" >"$2/childpid"; : >"$2/ready"
     while :; do sleep 0.05; done ;;
+  blind)
+    python3 -I "$HARNESS_CHILD" term0 >"$OP_WORKDIR/c.out" 2>&1 & op_register c "$!"
+    echo "$!" >"$2/childpid"; sleep 0.3
+    ps() { return 2; }   # from here on the process table cannot be read: cleanup must still be bounded
+    exit 0 ;;
 esac
 SH
 chmod +x "$fix/harness.sh"
@@ -231,6 +290,15 @@ rmdir "$root/optest-harness.decoy-partial" 2>/dev/null
 OWNED_PROCESS_TERM_MS=300 run_harness stubborn
 if [ "$H_RC" -eq 1 ] && check_clean "$H_DIR" && grep -q 'killed after ignoring SIGTERM' "$H_DIR/err"; then ok "a harness that would exit 0 still fails (1) when cleanup had to kill a TERM-ignoring child"; else bad "stubborn harness (rc=$H_RC): $(cat "$H_DIR/err")"; fi
 rmdir "$root/optest-harness.decoy-stubborn" 2>/dev/null
+
+# observation failure at cleanup time: the EXIT cleanup must not hang, must keep a failing status, must still
+# remove the harness directory, and must not touch the child it can no longer identify
+mkdir -p "$root/optest-harness.decoy-blind"
+t0=$SECONDS; run_harness blind; blind_elapsed=$((SECONDS - t0))
+blind_child="$(cat "$H_DIR/childpid" 2>/dev/null)"
+if [ "$H_RC" -eq 1 ] && [ "$blind_elapsed" -le 6 ] && [ -n "$blind_child" ] && running "$blind_child" && [ ! -e "$(cat "$H_DIR/workdir")" ] && grep -q 'not signalling and not waiting' "$H_DIR/err"; then ok "cleanup when the process table cannot be read: bounded ($blind_elapsed s), exit 1, directory removed, the unidentifiable child left alone"; else bad "blind cleanup (rc=$H_RC, ${blind_elapsed}s): $(cat "$H_DIR/err")"; fi
+if [ -n "$blind_child" ] && case "$(command ps -o command= -p "$blind_child" 2>/dev/null)" in *"$fix/child.py"*) true ;; *) false ;; esac; then builtin kill -KILL "$blind_child" 2>/dev/null || true; fi
+rmdir "$root/optest-harness.decoy-blind" 2>/dev/null
 
 # signals: launch through python so the harness gets default (not ignored) INT/TERM dispositions
 sig_case() { # sig_case NAME SIGNUM EXPECTED_RC
