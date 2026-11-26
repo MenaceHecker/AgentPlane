@@ -314,12 +314,14 @@ esac
 SH
 chmod +x "$fix/harness.sh"
 export HARNESS_LIB="$PWD/scripts/lib/owned-process.sh" HARNESS_CHILD="$fix/child.py"
-root="${TMPDIR:-/tmp}"; root="${root%/}"
+# The harness scenarios and their decoy directories live in THIS invocation's own fixture root, not in the shared
+# TMPDIR, so concurrent invocations cannot remove each other's decoys (review r2, finding 5, small related change).
+root="$fix/htmp"; mkdir -p "$root"
 
 run_harness() { # run_harness MODE -> sets H_RC, H_DIR; the harness runs with its own copy of the settings
   H_DIR="$fix/h-$1"; mkdir -p "$H_DIR"
   mkdir -p "$root/optest-harness.decoy-$1" # same prefix, not created by the harness: must survive
-  "$fix/harness.sh" "$1" "$H_DIR" >"$H_DIR/out" 2>"$H_DIR/err" &
+  TMPDIR="$root" "$fix/harness.sh" "$1" "$H_DIR" >"$H_DIR/out" 2>"$H_DIR/err" &
   local hp=$! n=0
   while builtin kill -0 "$hp" 2>/dev/null && [ "$n" -lt 400 ]; do sleep 0.05; n=$((n + 1)); done   # at most 20 s
   if builtin kill -0 "$hp" 2>/dev/null; then builtin kill -KILL "$hp" 2>/dev/null; wait "$hp" 2>/dev/null; H_RC=124; echo "harness exceeded 20 s" >>"$H_DIR/err"
@@ -355,10 +357,13 @@ rmdir "$root/optest-harness.decoy-blind" 2>/dev/null
 sig_case() { # sig_case NAME SIGNUM EXPECTED_RC
   local d="$fix/h-sig-$1"; mkdir -p "$d"
   local rc
-  rc="$(python3 -I - "$fix/harness.sh" "$d" "$2" <<'PY'
+  rc="$(python3 -I - "$fix/harness.sh" "$d" "$2" "$root" <<'PY'
 import os, signal, subprocess, sys, time
-h, d, sig = sys.argv[1], sys.argv[2], int(sys.argv[3])
-p = subprocess.Popen([h, "signal", d], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+h, d, sig, root = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+# A suite started as a background job inherits SIGINT ignored, and a shell cannot trap a signal that was
+# ignored on entry; reset it so the INT case does not depend on how the suite was launched.
+p = subprocess.Popen([h, "signal", d], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=dict(os.environ, TMPDIR=root),
+                     preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
 for _ in range(200):
     if os.path.exists(os.path.join(d, "ready")): break
     time.sleep(0.05)
