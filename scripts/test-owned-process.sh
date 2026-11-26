@@ -400,7 +400,7 @@ OP_WORKDIR=""
 saved_tmpdir="${TMPDIR-__unset__}"
 spell_case() { # spell_case LABEL ROOT_DIR SPELLING
   local label="$1" real="$2" spelling="$3" made
-  mkdir -p "$real"; real="$(printf '%s' "$real" | sed -e 's#//*#/#g')"   # (independent of the library) $fix itself contains a "//" on macOS (TMPDIR ends in a slash)
+  mkdir -p "$real"; real="$(cd "$real" && pwd -P)"   # (independent of the library) the PHYSICAL path: macOS resolves /var to /private/var, and $fix itself contains a "//" because TMPDIR ends in a slash
   TMPDIR="$spelling"; OP_WORKDIR=""
   if op_mktemp spelltest && made="$OP_WORKDIR" && [ -d "$made" ] && case "$made" in "$real"/spelltest.*) true ;; *) false ;; esac; then
     : >"$made/inside"
@@ -430,6 +430,41 @@ if ! diag op_remove_workdir && [ -e "$fix/tmp with space/spelltest.real/keep" ];
 OP_WORKDIR="$fix/tmp with space//elsewhere.zzz"; mkdir -p "$fix/tmp with space/elsewhere.zzz"
 if ! diag op_remove_workdir && [ -d "$fix/tmp with space/elsewhere.zzz" ]; then ok "TMPDIR spelling: a directory with another prefix is still refused"; else bad "wrong-prefix directory removed"; fi
 OP_WORKDIR="$weird_root"; op_remove_workdir >/dev/null 2>&1; OP_WORKDIR=""
+
+# --- ancestor retargeting (review r2, finding 4). Removal must act only on the directory op_mktemp
+# created, found by its recorded PHYSICAL path and checked by device and inode, never through how TMPDIR is
+# spelled. Every case plants an unrelated decoy directory with the SAME basename that must survive.
+restore_tmpdir() { [ "$saved_tmpdir" = "__unset__" ] && unset TMPDIR || TMPDIR="$saved_tmpdir"; }
+anc_setup() { # anc_setup N -> a fresh root pair under $fix/ancN: A (real), B (real), link -> A; creates the workdir through the link
+  ANC="$fix/anc$1"; mkdir -p "$ANC/A" "$ANC/B"; ln -s "$ANC/A" "$ANC/link"
+  TMPDIR="$ANC/link"; op_mktemp anctest || bad "op_mktemp failed through a symlinked TMPDIR"; restore_tmpdir
+  ANC_MADE="$OP_WORKDIR"; ANC_LEAF="${OP_WORKDIR##*/}"
+  mkdir -p "$ANC/B/$ANC_LEAF"; echo decoy >"$ANC/B/$ANC_LEAF/decoy"   # same basename, a different directory, in the other target
+}
+# 1. the reviewer's case: the workdir is created through link -> A, link is retargeted to B, then it is removed
+anc_setup 1
+if [ -d "$ANC/A/$ANC_LEAF" ] && case "$ANC_MADE" in *"/anc1/A/"*) true ;; *) false ;; esac; then ok "ancestor retarget: the workdir is created at the resolved physical path (under A, not under the link)"; else bad "workdir not at the physical path: $ANC_MADE"; fi
+ln -sfn "$ANC/B" "$ANC/link"   # retarget the TMPDIR symlink to B
+if diag op_remove_workdir && [ ! -e "$ANC/A/$ANC_LEAF" ] && [ -f "$ANC/B/$ANC_LEAF/decoy" ]; then ok "ancestor retarget: the harness's own directory (in A) is the one removed; the same-named decoy in B survives"; else bad "retargeted TMPDIR link: A/leaf exists=$([ -e "$ANC/A/$ANC_LEAF" ] && echo yes || echo no) decoy=$([ -f "$ANC/B/$ANC_LEAF/decoy" ] && echo kept || echo GONE): $(cat "$fix/diag.txt")"; fi
+# 2. a caller that spells the path through the retargeted link (which now leads to the decoy) is refused
+anc_setup 2; ln -sfn "$ANC/B" "$ANC/link"
+OP_WORKDIR="$ANC/link/$ANC_LEAF"
+if ! diag op_remove_workdir && [ -f "$ANC/B/$ANC_LEAF/decoy" ] && [ -d "$ANC/A/$ANC_LEAF" ]; then ok "ancestor retarget: a path spelled through the retargeted link, which now reaches the decoy, is refused and nothing is removed"; else bad "spelled path through a retargeted link was accepted: $(cat "$fix/diag.txt")"; fi
+OP_WORKDIR="$ANC_MADE"; op_remove_workdir >/dev/null 2>&1
+# 3. the recorded root is renamed away and a symlink put at its old name
+anc_setup 3; mv "$ANC/A" "$ANC/A.moved"; ln -s "$ANC/A.moved" "$ANC/A"
+if ! diag op_remove_workdir && grep -q 'no longer resolves to itself' "$fix/diag.txt" && [ -d "$ANC/A.moved/$ANC_LEAF" ] && [ -f "$ANC/B/$ANC_LEAF/decoy" ]; then ok "ancestor retarget: a root renamed away and replaced by a symlink is refused (no longer resolves to itself)"; else bad "renamed root with a symlink in its place: $(cat "$fix/diag.txt")"; fi
+# 4. the recorded root is replaced by a different real directory that holds a same-named decoy
+anc_setup 4; mv "$ANC/A" "$ANC/A.old"; mkdir -p "$ANC/A/$ANC_LEAF"; echo decoy >"$ANC/A/$ANC_LEAF/decoy"
+if ! diag op_remove_workdir && grep -q 'not the same directory as when' "$fix/diag.txt" && [ -f "$ANC/A/$ANC_LEAF/decoy" ] && [ -d "$ANC/A.old/$ANC_LEAF" ]; then ok "ancestor retarget: a root replaced by a different directory (new inode) is refused; its same-named decoy survives"; else bad "replaced root: $(cat "$fix/diag.txt")"; fi
+# 5. the workdir itself is removed and replaced by a different directory of the same name
+anc_setup 5; rmdir "$ANC/A/$ANC_LEAF"; mkdir "$ANC/A/$ANC_LEAF"; echo decoy >"$ANC/A/$ANC_LEAF/decoy"
+if ! diag op_remove_workdir && grep -q 'not the directory that was created' "$fix/diag.txt" && [ -f "$ANC/A/$ANC_LEAF/decoy" ]; then ok "ancestor retarget: a workdir replaced by another directory of the same name is refused; the replacement survives"; else bad "replaced workdir: $(cat "$fix/diag.txt")"; fi
+# 6. a directory the library did not create (no recorded identity) is never removed, whatever it is called
+OP_ROOT_PHYS=""; OP_ROOT_ID=""; OP_WORKDIR_ID=""; OP_TMP_ROOT="$fix"; OP_TMP_PREFIX="optest"
+mkdir -p "$fix/optest.manual"; echo keep >"$fix/optest.manual/f"; OP_WORKDIR="$fix/optest.manual"
+if ! diag op_remove_workdir && grep -q 'no recorded identity' "$fix/diag.txt" && [ -f "$fix/optest.manual/f" ]; then ok "a directory with a matching name that op_mktemp did not create is refused (no recorded identity)"; else bad "an unrecorded directory was removed: $(cat "$fix/diag.txt")"; fi
+OP_WORKDIR=""
 
 # --- the canary is still alive after the harness scenarios too
 if running "$canary" && running "$foreign"; then ok "the unrelated canary survived the harness scenarios as well"; else bad "the canary did not survive"; fi
