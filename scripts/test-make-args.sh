@@ -33,6 +33,13 @@ SH
   chmod +x "$fix/bin/$tool"
 done
 for tool in docker kind kubectl trivy go; do [ -x "$fix/bin/$tool" ] || { echo "ERROR: stub $tool was not created; refusing to run against real tools." >&2; exit 1; }; done
+# Observation point for what the Makefile exports: a target appended to the fixture's COPY of the real
+# Makefile (the repository Makefile is not changed) that writes the environment values as JSON.
+cat >"$repo/dump-env.py" <<'PY'
+import json, os, sys
+json.dump({k: os.environ.get(k) for k in sys.argv[1:]}, open(os.environ["DUMP_OUT"], "w"))
+PY
+printf '\ndump-env:\n\t@python3 -I dump-env.py $(DATA_VARS)\n' >>"$repo/Makefile"
 marker="$fix/MARKER"
 
 # payloads: name<TAB>value (MARKER is replaced by the marker path)
@@ -52,6 +59,9 @@ payloads=(
   "leading dash|-x"
   "newline|x
 touch MARKER"
+  "literal double dollar|a\$\$b"
+  "literal dollar run|\$\$\$\$"
+  "dollar variables and a trailing dollar|\$X \$(X) \${X} end\$"
 )
 
 run_make() { # run_make MODE TARGET VAR VALUE -> RC, OUT; MODE cmdline|env
@@ -96,6 +106,47 @@ PY
     run_make "$mode" mock-run MOCK_ARGS "$value"
     if [ ! -e "$marker" ]; then ok; else bad "mock-run $mode MOCK_ARGS [$name] executed a payload"; fi
   done
+done
+
+# --- every supported data variable (DATA_VARS in the real Makefile), every payload, both ways in:
+# nothing may execute and the value the Makefile exports must equal the input byte for byte,
+# including literal dollars and newlines (review r2, finding 2)
+data_vars="$(cd "$repo" && make -pn 2>/dev/null | sed -n 's/^DATA_VARS := //p' | tr -s ' ' '\n' | grep -v '^$' | grep -v '^\\$')"
+[ -n "$data_vars" ] || { bad "could not read DATA_VARS from the Makefile"; data_vars=""; }
+exact() { python3 -I - "$DUMP_OUT" "$1" "$2" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+sys.exit(0 if d.get(sys.argv[2]) == sys.argv[3] else 1)
+PY
+}
+export DUMP_OUT="$fix/dump.json"
+for var in $data_vars; do
+  for entry in "${payloads[@]}"; do
+    name="${entry%%|*}"; value="${entry#*|}"; value="${value//MARKER/$marker}"
+    for mode in cmdline env; do
+      rm -f "$marker" "$DUMP_OUT"
+      if [ "$mode" = cmdline ]; then OUT="$(cd "$repo" && PATH="$fix/bin:$PATH" make dump-env "$var=$value" 2>&1)"; RC=$?
+      else OUT="$(cd "$repo" && env "$var=$value" PATH="$fix/bin:$PATH" make dump-env 2>&1)"; RC=$?; fi
+      if [ ! -e "$marker" ] && [ "$RC" -eq 0 ] && exact "$var" "$value"; then ok; else bad "$var $mode [$name]: marker=$([ -e "$marker" ] && echo CREATED || echo no) rc=$RC exported-exactly=$(exact "$var" "$value" && echo yes || echo NO): $OUT"; fi
+    done
+  done
+  # a variable nobody set: one with a default in the Makefile exports exactly that default; the others
+  # stay unset (nothing is exported as an empty string)
+  default="$(sed -n "s/^$var ?= *//p" "$repo/Makefile" | head -1)"
+  rm -f "$DUMP_OUT"; OUT="$(cd "$repo" && env -u "$var" PATH="$fix/bin:$PATH" make dump-env 2>&1)"; RC=$?
+  if [ -n "$default" ]; then
+    if [ "$RC" -eq 0 ] && exact "$var" "$default"; then ok; else bad "$var unset: expected its default '$default': $OUT"; fi
+  elif [ "$RC" -eq 0 ] && python3 -I -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))[sys.argv[2]] is None else 1)' "$DUMP_OUT" "$var"; then ok
+  else bad "$var unset: it was exported anyway: $OUT"; fi
+done
+# the list covers everything the scripts read from the environment, and the documentation names every entry
+script_inputs="$(grep -ohE '\$\{[A-Z][A-Z0-9_]+(:-|:=|-|:\?)' scripts/kind-cluster.sh scripts/scan-mock-image.sh scripts/check-go.sh scripts/scan-secrets.sh scripts/check-contracts.sh scripts/mock-smoke.sh | sed -E 's/^\$\{([A-Z0-9_]+).*/\1/' | sort -u)"
+for v in $script_inputs; do
+  case "$v" in SCAN_TRIVY_VERSION) continue ;; esac   # set by the recipe from IMAGE_SCANNER_VERSION, not an input
+  if printf '%s\n' "$data_vars" | grep -qx "$v"; then ok; else bad "scripts read \$$v from the environment but it is not in DATA_VARS in the Makefile"; fi
+done
+for v in $data_vars; do
+  if grep -q "\`$v\`" docs/local-development.md; then ok; else bad "DATA_VARS contains $v but docs/local-development.md does not name it"; fi
 done
 
 # mock-run still passes ordinary flags through as separate arguments

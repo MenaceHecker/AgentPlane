@@ -14,20 +14,37 @@ MOCK_IMAGE ?= agentplane/mockmodel:p0
 # Local kind cluster name. Only this named cluster is ever created or deleted.
 KIND_CLUSTER_NAME ?= agentplane
 
-# Values a caller supplies are DATA, never Make or shell syntax (review P0-T5-r1, finding 3).
-# They used to be pasted into shell recipes between quotes, so a quote in a value ran as shell
-# code, and Make re-reads a value ($(shell ...), $(VAR)) whenever it expands or exports it.
-# Each is now captured as raw text ($(value ...) is not scanned again) into a simple variable
-# and handed to recipes only through the environment ("$$VAR"): the shell expands it once and
-# never parses it. Scripts validate the values before any tool runs.
-override GOLANGCI_LINT_VERSION := $(value GOLANGCI_LINT_VERSION)
-override GITLEAKS_VERSION := $(value GITLEAKS_VERSION)
-override KIND_VERSION := $(value KIND_VERSION)
-override IMAGE_SCANNER_VERSION := $(value IMAGE_SCANNER_VERSION)
-override MOCK_IMAGE := $(value MOCK_IMAGE)
-override KIND_CLUSTER_NAME := $(value KIND_CLUSTER_NAME)
-override MOCK_ARGS := $(value MOCK_ARGS)
-export GOLANGCI_LINT_VERSION GITLEAKS_VERSION KIND_VERSION IMAGE_SCANNER_VERSION MOCK_IMAGE KIND_CLUSTER_NAME MOCK_ARGS
+# Values a caller supplies are DATA, never Make or shell syntax (review P0-T5-r1, finding 3, and
+# r2, finding 2). They used to be pasted into shell recipes between quotes, so a quote in a value
+# ran as shell code, and Make re-reads a value ($(shell ...), $(VAR), $$) whenever it expands or
+# exports it, even for a variable the Makefile never mentions.
+#
+# DATA_VARS is the complete list of supported data inputs: the values the recipes and scripts
+# read. Each one that is defined (on the command line, in the environment or above) is captured
+# as raw text ($(value ...) is not scanned again) into a simple variable, exported, and used by
+# recipes only through the environment ("$$VAR"), where the shell expands it once and never
+# parses it. A literal dollar sign survives unchanged. Scripts then validate the values before
+# any tool runs. An undefined variable stays undefined, so nothing is exported as empty.
+#
+# What this does NOT and cannot protect, because it is executable Make syntax and not data:
+#   * the Makefile itself, `-f`/`--file`, `--eval`, `include`, and Make flags (MAKEFLAGS);
+#   * an immediate assignment on the command line (`VAR:=...` or `VAR::=...`), which Make
+#     expands while reading its arguments, before any line of this file runs;
+#   * a command-line value for a variable that is NOT in DATA_VARS: Make expands every exported
+#     command-line variable's value, so `$(shell ...)` in it runs.
+# Whoever writes the make command line controls Make; this section only keeps the supported
+# VALUES from being interpreted. Add a variable to DATA_VARS before a script starts reading it
+# (scripts/test-make-args.sh fails if the list and the documentation disagree).
+DATA_VARS := GOLANGCI_LINT_VERSION GITLEAKS_VERSION KIND_VERSION IMAGE_SCANNER_VERSION MOCK_IMAGE \
+  KIND_CLUSTER_NAME MOCK_ARGS KIND_CONFIG KINDSHAPE_BIN SCAN_EVIDENCE_DIR TMPDIR KUBECONFIG
+
+define capture_data
+ifneq ($$(origin $(1)),undefined)
+override $(1) := $$(value $(1))
+export $(1)
+endif
+endef
+$(foreach v,$(DATA_VARS),$(eval $(call capture_data,$(v))))
 
 .PHONY: help
 help: ## List available targets
