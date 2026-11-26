@@ -16,7 +16,8 @@ failed=0
 ok()  { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; failed=$((failed + 1)); }
 # Fixture processes are tracked with their start time and killed at exit only if that
-# start time still matches, so cleanup can never signal a recycled PID. This runs even
+# start time still matches (one-second resolution: this makes signalling a recycled PID very
+# unlikely, it is not a guarantee). This runs even
 # when assertions fail, so a failing run leaves nothing behind.
 tracked=()
 track_pid() { tracked+=("$1|$(command ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ')"); }

@@ -156,7 +156,7 @@ rescan and record the digests in the run report.
 - Local only; one tested host (macOS arm64). No Linux or amd64 cluster claim.
 - Labels and the taint are placement simulation, not isolation (no NetworkPolicy
   enforcement, no Pod Security, no policy engine yet).
-- Process identity: the smoke harness checks that a PID is still its own child (parent and start time, cross-checked with the shell job table) at every poll and immediately before each signal, and signals nothing if that cannot be established. A window of microseconds between the last check and the kill system call cannot be closed by any PID-based check; closing it would need a supervisor process or a kernel process handle (see `agents/runs/P0-T5.md`).
+- Process identity is best effort, not unique: the smoke harness checks that a PID is still its own child (parent, start time as `ps` prints it to the second, and the shell job table) at every poll and immediately before each signal, and signals nothing if that cannot be established. It cannot tell a registered child from a new child of the same shell that received the same PID within the same second (reproduced in review r2), and there is an unquantified gap between the last check and the kill system call. The exposure is a sibling child of the same shell, not an arbitrary process. Closing it needs a design decision recorded as Blocked in `agents/runs/P0-T5.md`.
 - Scan results are a point-in-time record against the database downloaded at
   scan time and say nothing about future findings or about unscanned images.
 - The kind binary from Homebrew is not byte-identical to the upstream release

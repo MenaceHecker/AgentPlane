@@ -4,9 +4,17 @@
 # It exists so a harness can start a background child, stop exactly that child
 # with a bounded wait, and always leave nothing behind (review P0-T4-r1,
 # finding 4). Rules the code enforces:
-#   * Only a PID this shell started and registered is ever signalled, and only
-#     while that PID has not been reaped (an unreaped PID cannot be reused).
-#     Nothing is signalled by name, by pattern, or by process group.
+#   * Only a PID this shell started and registered is signalled, never by name,
+#     by pattern or by process group, and only after the child's identity (parent,
+#     start time as ps prints it, and this shell's job table) has been checked
+#     immediately before the signal. THIS IS NOT A UNIQUE IDENTITY (review
+#     P0-T5-r2, finding 1, reproduced): if bash has collected a registered child
+#     and its PID is given to a NEW child of the same shell started within the same
+#     one-second start time, ps and the job table cannot tell them apart and a signal
+#     can reach the replacement. There is also an unquantified gap between the last
+#     check and the kill system call. Neither is closed here; the exposure is a
+#     sibling child of the same shell, not an arbitrary process. See
+#     agents/runs/P0-T5.md (Blocked) for the design decision this needs.
 #   * Graceful stop: SIGTERM, then wait at most OWNED_PROCESS_TERM_MS (default
 #     10000). If the child is still running, SIGKILL that same child and wait at
 #     most OWNED_PROCESS_KILL_MS (default 5000), then reap it. A child that
@@ -65,8 +73,10 @@ op__ps_fields() {
 
 # op__in_jobs MODE PID: is PID in this shell's job table? MODE "-r" = running jobs only,
 # "-p" = all jobs. The table is the shell's own record of the children IT started and
-# has not yet collected, so a recycled PID cannot appear in it and a failing or lying ps
-# cannot change it. Returns 0 listed, 1 not listed, 2 the table could not be read.
+# has not yet collected, so a PID recycled for an unrelated process does not appear in it
+# and a failing or lying ps cannot change it. It does NOT tell a registered child from a
+# new child of this same shell that was given the same PID. Returns 0 listed, 1 not
+# listed, 2 the table could not be read.
 # Only meaningful in the shell that started the children (not in a subshell).
 op__in_jobs() {
   local list
