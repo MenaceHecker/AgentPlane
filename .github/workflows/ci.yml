@@ -73,6 +73,10 @@ jobs:
       # Prints "NOT APPLICABLE: Go module not introduced (P0-T3)" until go.mod exists.
       - name: make test
         run: make test
+      # Unit tests of the owned-child supervision library (ADR-007): sole-waiter
+      # ownership, replacement identities with a fake adapter, real-child lifecycles.
+      - name: make supervisor-test
+        run: make supervisor-test
       # Tests the owned-child helper the smoke harness relies on: bounded
       # termination, escalation for a TERM-ignoring child, partial-start and
       # signal cleanup, and that unrelated processes survive.

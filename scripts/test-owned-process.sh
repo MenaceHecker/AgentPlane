@@ -480,4 +480,12 @@ if ! grep -q 'lib/owned-process.sh' scripts/mock-smoke.sh; then bad "scripts/moc
 elif [ -s "$fix/bare.txt" ]; then bad "scripts/mock-smoke.sh has a bare wait or kill: $(cat "$fix/bare.txt")"
 else ok "scripts/mock-smoke.sh uses the helper and has no bare wait or kill"; fi
 
+# --- the Python ownership library (ADR-007): unit tests with a fake adapter plus real-child cases
+ut_out="$fix/unittest.out"
+if python3 -I -m unittest discover -s scripts/tests -p 'test_owned_process.py' >"$ut_out" 2>&1; then
+  ok "python ownership-library tests pass ($(grep -E '^Ran ' "$ut_out"))"
+else
+  bad "python ownership-library tests failed"; tail -30 "$ut_out" | sed 's/^/        /'
+fi
+
 if [ "$failed" -eq 0 ]; then echo "owned-process self-test: all passed"; else echo "owned-process self-test: $failed FAILED"; exit 1; fi

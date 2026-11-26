@@ -49,3 +49,7 @@ tmp/
 .DS_Store
 .idea/
 .vscode/
+
+# Python byte-code caches (the owned-process library and its tests)
+__pycache__/
+*.pyc
