@@ -110,6 +110,7 @@ image-scan-test: ## Test the image scan gate with fixture reports and stub tools
 .PHONY: supervisor-test
 supervisor-test: ## Unit tests of the owned-child supervision library (needs python3; identity cases use a fake adapter, nothing real is signalled)
 	@python3 -I -m unittest discover -s scripts/tests -p 'test_owned_process.py' -v
+	@python3 -I -m unittest discover -s scripts/tests -p 'test_repeat_owned_process.py' -v
 
 .PHONY: smoke-cleanup-test
 smoke-cleanup-test: ## Test the owned-process helper used by mock-smoke (needs bash and python3)
