@@ -44,6 +44,13 @@ name() { while [ $# -gt 0 ]; do [ "$1" = --name ] && { echo "$2"; return; }; shi
 case "$1 $2" in
   "version "*|"version ") echo "kind v${STUB_KIND_VERSION:-0.31.0} go1.25.5 darwin/arm64" ;;
   "get clusters")
+    # test hook: act like an attacker who retargets the TMPDIR symlink while the script runs and plants a
+    # decoy with the same basename as the script's temp directory in the new target
+    if [ -n "${STUB_RETARGET_LINK:-}" ]; then
+      leaf="$(ls "$STUB_RETARGET_FROM" | grep '^kind-cluster\.' | head -1)"
+      mkdir -p "$STUB_RETARGET_TO/$leaf"; echo decoy >"$STUB_RETARGET_TO/$leaf/decoy"
+      ln -sfn "$STUB_RETARGET_TO" "$STUB_RETARGET_LINK"
+    fi
     [ -n "${STUB_GET_CLUSTERS_FAIL:-}" ] && { echo "failed to list clusters" >&2; exit 1; }
     cat "$ST/clusters" ;;
   "create cluster")
@@ -259,6 +266,13 @@ if command -v kubectl >/dev/null 2>&1; then
   KUBECONFIG="$kc/invalid.yaml" kubectl config view -o 'jsonpath={.current-context}' >/dev/null 2>&1; [ $? -ne 0 ] || real_ok=0
   [ "$real_ok" -eq 1 ] && ok "real kubectl: an unset, empty or missing kubeconfig reads as exit 0 with no output, a corrupt one as a nonzero exit (the contract the stub models)" || bad "real kubectl does not behave as the stub models"
 else ok "real-kubectl contract check skipped (kubectl not installed)"; fi
+
+# --- the script's own temp directory: retargeting the TMPDIR symlink mid-run must not redirect its removal
+rt="$fix/retarget"; mkdir -p "$rt/A" "$rt/B"; ln -s "$rt/A" "$rt/link"
+reset "$PRIOR" agentplane-t
+OUT="$(TMPDIR="$rt/link" STUB_RETARGET_LINK="$rt/link" STUB_RETARGET_FROM="$rt/A" STUB_RETARGET_TO="$rt/B" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh up agentplane-t 2>&1)"; RC=$?
+decoys="$(ls "$rt/B" | grep -c '^kind-cluster\.')"; leftovers="$(ls "$rt/A" | grep -c '^kind-cluster\.')"
+if [ $RC -eq 0 ] && [ "$decoys" -eq 1 ] && [ -f "$rt/B/$(ls "$rt/B" | grep '^kind-cluster\.' | head -1)/decoy" ] && [ "$leftovers" -eq 0 ]; then ok "kind-cluster.sh: a TMPDIR symlink retargeted mid-run removes the script's own directory (in A) and leaves the same-named decoy in B"; else bad "retargeted TMPDIR (rc=$RC, decoys=$decoys, leftovers in A=$leftovers): $OUT"; fi
 
 names_ok=1
 for badname in "" "Agent" "a;b" "-a" "a-" "a b" 'a$(id)' "a/b"; do

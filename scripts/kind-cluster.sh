@@ -19,6 +19,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# The temp directory is created and removed by the owned-process helper, which anchors
+# ownership to the physical path and the directory's identity (review P0-T5-r2, finding 4),
+# not to how TMPDIR is spelled.
+# shellcheck source=lib/owned-process.sh
+. scripts/lib/owned-process.sh
+
 KIND_VERSION="${KIND_VERSION:-0.31.0}"          # pinned; the Makefile passes the same value
 KIND_CONFIG="${KIND_CONFIG:-deploy/kind/config.yaml}"
 
@@ -45,7 +51,8 @@ have="$(kind version 2>/dev/null | sed -n 's/^kind v\([0-9][0-9.]*\).*/\1/p' | h
 # without one, an empty file, no file) and exits nonzero when the kubeconfig cannot be loaded;
 # `kubectl config current-context` exits 1 for both, so it cannot tell them apart. An empty
 # string is therefore never inferred from an error: no successful read, no conclusion.
-work="$(mktemp -d "${TMPDIR:-/tmp}/kind-cluster.XXXXXX")"
+op_mktemp kind-cluster || die "cannot create a temp directory."
+work="$OP_WORKDIR"
 prior=""; want=""; prior_known=""
 
 # ctx_read: sets CTX_NOW and returns 0 only if the read succeeded (CTX_NOW empty means "no
@@ -102,8 +109,12 @@ finish() {
       rc=1
     fi
   fi
-  # remove our temp dir last: the reads above write their error output into it
-  case "$work" in "${TMPDIR:-/tmp}"/kind-cluster.*) rm -rf -- "$work" ;; esac
+  # remove our temp dir last: the reads above write their error output into it. A refusal (the
+  # directory is not the one we created) leaves it alone and fails an otherwise successful run.
+  if ! op_remove_workdir; then
+    echo "kind-cluster: ERROR: the temp directory was not removed (see above)." >&2
+    if [ "$rc" -eq 0 ]; then rc=1; fi
+  fi
   exit "$rc"
 }
 trap finish EXIT
