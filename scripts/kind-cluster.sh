@@ -39,50 +39,83 @@ docker info >/dev/null 2>&1 || die "the Docker daemon is not reachable. Start Do
 have="$(kind version 2>/dev/null | sed -n 's/^kind v\([0-9][0-9.]*\).*/\1/p' | head -1)"
 [ "$have" = "$KIND_VERSION" ] || die "kind $KIND_VERSION is required (found '${have:-unknown}'): the node image pinned in $KIND_CONFIG is only supported by that release. See docs/local-development.md."
 
-clusters="$(kind get clusters 2>&1)" || die "'kind get clusters' failed; refusing to guess whether '$name' exists: $clusters"
-exists=""
-if printf '%s\n' "$clusters" | grep -qx -- "$name"; then exists=1; fi
+# --- the current kubectl context (review r2, finding 3) -----------------------------------
+# A read is only trusted if it SUCCEEDED. `kubectl config view -o jsonpath={.current-context}`
+# exits 0 with empty output when there is positively no current context (a valid kubeconfig
+# without one, an empty file, no file) and exits nonzero when the kubeconfig cannot be loaded;
+# `kubectl config current-context` exits 1 for both, so it cannot tell them apart. An empty
+# string is therefore never inferred from an error: no successful read, no conclusion.
+work="$(mktemp -d "${TMPDIR:-/tmp}/kind-cluster.XXXXXX")"
+prior=""; want=""; prior_known=""
 
-# The current kubectl context before we touch anything (local file read only).
-prior="$(kubectl config current-context 2>/dev/null || true)"
-want="$prior"   # the current context this run must leave behind
-work=""
+# ctx_read: sets CTX_NOW and returns 0 only if the read succeeded (CTX_NOW empty means "no
+# current context", established); returns 1 with CTX_ERR set if the read failed.
+ctx_read() {
+  local out
+  CTX_NOW=""; CTX_ERR=""
+  if ! out="$(kubectl config view -o 'jsonpath={.current-context}' 2>"$work/ctx.err")"; then
+    CTX_ERR="$(tr '\n' ' ' <"$work/ctx.err")"
+    return 1
+  fi
+  CTX_NOW="$out"
+}
 
-# restore_context: make the current context exactly $want again, and VERIFY it. Returns 0
-# only if it is; otherwise it says what the current context really is and returns 1.
+# restore_context: make the current context exactly $want again, and VERIFY it by reading it
+# back. Returns 0 only if a successful read shows it is; a failed read is never success.
 restore_context() {
-  local now err=""
-  now="$(kubectl config current-context 2>/dev/null || true)"
-  [ "$now" != "$want" ] || return 0
+  local err=""
+  if ! ctx_read; then
+    echo "kind-cluster: ERROR: cannot read your kubectl current context to verify it ($CTX_ERR); it may no longer be '${want:-<none>}'. Check it: kubectl config view -o 'jsonpath={.current-context}'" >&2
+    return 1
+  fi
+  [ "$CTX_NOW" != "$want" ] || return 0
   if [ -n "$want" ]; then
     err="$(kubectl config use-context "$want" 2>&1 >/dev/null)" || true
   else
     err="$(kubectl config unset current-context 2>&1 >/dev/null)" || true
   fi
-  now="$(kubectl config current-context 2>/dev/null || true)"   # trust the result, not the exit status
-  [ "$now" != "$want" ] || return 0
-  echo "kind-cluster: ERROR: could not restore your kubectl current context: it was '${want:-<none>}' and it is now '${now:-<none>}'${err:+ ($err)}." >&2
+  if ! ctx_read; then   # trust the result, never the exit status of use-context or unset
+    echo "kind-cluster: ERROR: restored your kubectl current context but cannot read it back to verify it ($CTX_ERR); it should be '${want:-<none>}'." >&2
+    return 1
+  fi
+  [ "$CTX_NOW" != "$want" ] || return 0
+  echo "kind-cluster: ERROR: could not restore your kubectl current context: it was '${want:-<none>}' and it is now '${CTX_NOW:-<none>}'${err:+ ($err)}." >&2
   if [ -n "$want" ]; then echo "  Restore it yourself: kubectl config use-context '$want'" >&2
   else echo "  Unset it yourself: kubectl config unset current-context" >&2; fi
   return 1
 }
 
 # One exit path for success, refusal and failure, in both modes: restore and verify the
-# context, remove only our temp dir, keep an earlier failure's status, and fail an
-# otherwise successful run if the context could not be restored.
+# context (only if it was established before anything changed), remove only our temp dir,
+# keep an earlier failure's status, and fail an otherwise successful run if the context could
+# not be restored, read back or reported.
 finish() {
-  local rc=$? rrc=0 now
+  local rc=$? rrc=0
   trap - EXIT
-  restore_context || rrc=1
-  case "$work" in "${TMPDIR:-/tmp}"/kind-cluster.*) rm -rf -- "$work" ;; esac
+  if [ -n "$prior_known" ]; then restore_context || rrc=1; fi
   if [ "$rrc" -ne 0 ] && [ "$rc" -eq 0 ]; then rc=1; fi
-  if [ "$rc" -eq 0 ]; then
-    now="$(kubectl config current-context 2>/dev/null || true)"
-    echo "kind-cluster: your kubectl current context is '${now:-<none>}' (verified)."
+  if [ "$rc" -eq 0 ] && [ -n "$prior_known" ]; then
+    if ctx_read; then
+      echo "kind-cluster: your kubectl current context is '${CTX_NOW:-<none>}' (verified)."
+    else
+      echo "kind-cluster: ERROR: cannot read your kubectl current context to report it ($CTX_ERR)." >&2
+      rc=1
+    fi
   fi
+  # remove our temp dir last: the reads above write their error output into it
+  case "$work" in "${TMPDIR:-/tmp}"/kind-cluster.*) rm -rf -- "$work" ;; esac
   exit "$rc"
 }
 trap finish EXIT
+
+# Establish the prior state BEFORE anything is created, exported or deleted. If it cannot be
+# established the run changes nothing.
+ctx_read || die "cannot establish your current kubectl context ($CTX_ERR); refusing to change anything. Fix your kubeconfig first: kubectl config view"
+prior="$CTX_NOW"; want="$prior"; prior_known=1
+
+clusters="$(kind get clusters 2>&1)" || die "'kind get clusters' failed; refusing to guess whether '$name' exists: $clusters"
+exists=""
+if printf '%s\n' "$clusters" | grep -qx -- "$name"; then exists=1; fi
 
 if [ "$mode" = down ]; then
   if [ -n "$exists" ]; then
@@ -97,7 +130,6 @@ if [ "$mode" = down ]; then
 fi
 
 # --- up
-work="$(mktemp -d "${TMPDIR:-/tmp}/kind-cluster.XXXXXX")"
 command -v go >/dev/null 2>&1 || die "go not found (it builds the topology checker)."
 if [ -n "${KINDSHAPE_BIN:-}" ]; then
   shape="$KINDSHAPE_BIN"
@@ -126,7 +158,9 @@ MSG
 }
 
 if [ -n "$exists" ]; then
-  if ! kubectl config get-contexts -o name 2>/dev/null | grep -qx -- "$ctx"; then
+  # a failed read is not "the context is missing": it must not lead to an export
+  contexts="$(kubectl config get-contexts -o name 2>"$work/contexts.err")" || die "cannot list your kubeconfig contexts ($(tr '\n' ' ' <"$work/contexts.err")); refusing to change anything."
+  if ! printf '%s\n' "$contexts" | grep -qx -- "$ctx"; then
     echo "kind-cluster: cluster '$name' exists but kubeconfig has no context '$ctx'; exporting it."
     kind export kubeconfig --name "$name"
   fi

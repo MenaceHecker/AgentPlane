@@ -64,14 +64,30 @@ echo "kubectl $*" >>"$ST/log"
 case "$1" in
   config)
     case "$2" in
-      current-context) [ -s "$ST/current" ] && cat "$ST/current" || { echo "error: current-context is not set" >&2; exit 1; } ;;
+      current-context)
+        # real kubectl exits 1 for BOTH "no current context" and an unloadable kubeconfig; only the message differs
+        n=$(( $(cat "$ST/ctxreads" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$ST/ctxreads"
+        for f in ${STUB_CTXREAD_FAIL_ON:-}; do
+          if [ "$f" = "$n" ]; then echo "error: error loading config file \"/stub/kubeconfig\": invalid" >&2; exit 1; fi
+        done
+        if [ -s "$ST/current" ]; then cat "$ST/current"; else echo "error: current-context is not set" >&2; exit 1; fi ;;
+      view)
+        # `kubectl config view -o jsonpath={.current-context}`: exit 0 with empty output when there is no current context,
+        # nonzero when the kubeconfig cannot be loaded. STUB_CTXREAD_FAIL_ON is a list of 1-based call numbers that fail.
+        n=$(( $(cat "$ST/ctxreads" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$ST/ctxreads"
+        for f in ${STUB_CTXREAD_FAIL_ON:-}; do
+          if [ "$f" = "$n" ]; then echo "error: error loading config file \"/stub/kubeconfig\": invalid" >&2; exit 1; fi
+        done
+        cat "$ST/current" ;;
       use-context)
         if [ -n "${STUB_USECONTEXT_FAIL:-}" ]; then echo "error: no context exists with the name: \"$3\"" >&2; exit 1; fi
         if [ -z "${STUB_USECONTEXT_NOOP:-}" ]; then echo "$3" >"$ST/current"; fi ;;   # NOOP: claims success but changes nothing
       unset)
         if [ -n "${STUB_UNSET_FAIL:-}" ]; then echo "error: could not unset" >&2; exit 1; fi
         if [ "$3" = current-context ]; then : >"$ST/current"; fi ;;
-      get-contexts) cat "$ST/contexts" ;;
+      get-contexts)
+        if [ -n "${STUB_GETCONTEXTS_FAIL:-}" ]; then echo "error: error loading config file" >&2; exit 1; fi
+        cat "$ST/contexts" ;;
       *) echo "stub kubectl: unexpected config $*" >&2; exit 99 ;;
     esac ;;
   --context)
@@ -115,7 +131,7 @@ reset() { # reset PRIOR_CONTEXT CLUSTERS...
   : >"$ST/log"; : >"$ST/violations"; : >"$ST/clusters"; : >"$ST/contexts"; : >"$ST/current"
   [ -z "$prior" ] || { echo "$prior" >"$ST/current"; echo "$prior" >"$ST/contexts"; }
   local c; for c in "$@"; do echo "$c" >>"$ST/clusters"; echo "kind-$c" >>"$ST/contexts"; done
-  unset STUB_DOCKER_DOWN STUB_KIND_VERSION STUB_GET_CLUSTERS_FAIL STUB_GETNODES_FAIL KIND_CONFIG STUB_USECONTEXT_FAIL STUB_USECONTEXT_NOOP STUB_UNSET_FAIL STUB_DELETE_SWITCH
+  unset STUB_DOCKER_DOWN STUB_KIND_VERSION STUB_GET_CLUSTERS_FAIL STUB_GETNODES_FAIL KIND_CONFIG STUB_USECONTEXT_FAIL STUB_USECONTEXT_NOOP STUB_UNSET_FAIL STUB_DELETE_SWITCH STUB_CTXREAD_FAIL_ON STUB_GETCONTEXTS_FAIL
   export STUB_NODES="$fix/nodes-good.json"
 }
 run() { # run MODE NAME -> OUT, RC
@@ -188,6 +204,61 @@ reset "$PRIOR" agentplane-x; export STUB_DELETE_SWITCH=some-other-context; run d
 if [ $RC -eq 0 ] && [ "$(cur)" = "$PRIOR" ]; then ok "down restores the prior context if kind switched it"; else bad "down restore (rc=$RC, current='$(cur)'): $OUT"; fi
 reset "$PRIOR" agentplane-x; export STUB_DELETE_SWITCH=some-other-context STUB_USECONTEXT_FAIL=1; run down agentplane-x
 if [ $RC -ne 0 ] && printf '%s' "$OUT" | grep -q "it is now 'some-other-context'"; then ok "down fails and reports the actual context if the switched context cannot be restored"; else bad "down failed restore (rc=$RC): $OUT"; fi
+
+# --- a FAILED read of the current context is never success (review r2, finding 3). For each scenario, count
+# the reads a normal run makes, then fail EACH read in turn: the run must exit nonzero, must never claim
+# "(verified)", and if the very first read (the one that establishes the prior state) fails nothing may be
+# created, exported or deleted and the context must be untouched.
+mutations() { grep -cE '^kind (create|delete|export)' "$ST/log" || true; }
+setup_scenario() { # setup_scenario NAME -> prepares the stub state, sets SC_MODE and SC_NAME
+  case "$1" in
+    "create, prior context set")      reset "$PRIOR"; SC_MODE=up; SC_NAME=agentplane-t ;;
+    "create, no prior context")       reset "";       SC_MODE=up; SC_NAME=agentplane-t ;;
+    "existing compatible cluster")    reset "$PRIOR" agentplane-t; SC_MODE=up; SC_NAME=agentplane-t ;;
+    "existing, context not in kubeconfig") reset "$PRIOR" agentplane-t; echo "$PRIOR" >"$ST/contexts"; SC_MODE=up; SC_NAME=agentplane-t ;;
+    "existing incompatible cluster")  reset "$PRIOR" agentplane-t; export STUB_NODES="$fix/nodes-single.json"; SC_MODE=up; SC_NAME=agentplane-t ;;
+    "down of an unrelated cluster")   reset "$PRIOR" agentplane-x; SC_MODE=down; SC_NAME=agentplane-x ;;
+  esac
+}
+read_fail_ok=1
+for sc in "create, prior context set" "create, no prior context" "existing compatible cluster" "existing, context not in kubeconfig" "existing incompatible cluster" "down of an unrelated cluster"; do
+  setup_scenario "$sc"; run "$SC_MODE" "$SC_NAME"; baseline_rc=$RC; reads="$(cat "$ST/ctxreads" 2>/dev/null || echo 0)"
+  if [ "$reads" -lt 2 ]; then bad "read-failure scenario '$sc': only $reads reads in a normal run"; read_fail_ok=0; continue; fi
+  i=1
+  while [ "$i" -le "$reads" ]; do
+    setup_scenario "$sc"; export STUB_CTXREAD_FAIL_ON="$i"; run "$SC_MODE" "$SC_NAME"
+    if [ $RC -eq 0 ] || printf '%s' "$OUT" | grep -q '(verified)'; then bad "[$sc] failing context read #$i of $reads: rc=$RC and/or a (verified) claim: $OUT"; read_fail_ok=0
+    elif [ "$i" -eq 1 ] && { [ "$(mutations)" -ne 0 ] || [ "$(cur)" != "$(if [ "$sc" = "create, no prior context" ]; then echo ""; else echo "$PRIOR"; fi)" ] || ! printf '%s' "$OUT" | grep -q 'cannot establish your current kubectl context'; }; then bad "[$sc] the first read failed but the run changed something or gave the wrong message (mutations=$(mutations), current='$(cur)'): $OUT"; read_fail_ok=0
+    elif [ "$i" -eq "$reads" ] && ! printf '%s' "$OUT" | grep -qE 'cannot read your kubectl current context to report it|cannot read your kubectl current context to verify'; then bad "[$sc] the last read (#$i, the report) failed but no read error was reported: $OUT"; read_fail_ok=0; fi
+    i=$((i + 1))
+  done
+done
+[ "$read_fail_ok" -eq 1 ] && ok "every failing context read (at capture, at restore, at read-back and at the final report) in six scenarios is a nonzero exit, never a (verified) claim, and a failed first read changes nothing"
+# the fixed script never uses `kubectl config current-context` (it cannot tell "not set" from "unreadable")
+setup_scenario "create, prior context set"; run up agentplane-t
+if ! grep -q '^kubectl config current-context' "$ST/log" && grep -q '^kubectl config view -o jsonpath' "$ST/log"; then ok "the script reads the current context only with config view (exit status separates absence from failure), never with config current-context"; else bad "the script used config current-context or never read the context: $(grep '^kubectl config' "$ST/log" | head -3)"; fi
+# the reviewer's two probes, named: A) initial read fails although a prior context exists, B) no prior context, create switches it, later reads fail
+setup_scenario "create, prior context set"; export STUB_CTXREAD_FAIL_ON="1"; run up agentplane-t
+if [ $RC -ne 0 ] && [ "$(count 'kind create')" -eq 0 ] && [ "$(cur)" = "$PRIOR" ] && ! grep -q 'unset' "$ST/log"; then ok "probe A: an unreadable initial context aborts before any mutation and the existing context is not unset"; else bad "probe A (rc=$RC, current='$(cur)'): $OUT"; fi
+setup_scenario "create, no prior context"; export STUB_CTXREAD_FAIL_ON="2 3 4"; run up agentplane-t
+if [ $RC -ne 0 ] && [ "$(cur)" = "kind-agentplane-t" ] && ! printf '%s' "$OUT" | grep -q '(verified)'; then ok "probe B: after create switched an empty context, unreadable follow-up reads fail the run and the real remaining context is not claimed restored"; else bad "probe B (rc=$RC, current='$(cur)'): $OUT"; fi
+setup_scenario "existing, context not in kubeconfig"; export STUB_GETCONTEXTS_FAIL=1; run up agentplane-t
+if [ $RC -ne 0 ] && [ "$(count 'kind export')" -eq 0 ] && printf '%s' "$OUT" | grep -q 'cannot list your kubeconfig contexts'; then ok "a failing contexts listing is not treated as a missing context: no export, the run fails"; else bad "failed get-contexts (rc=$RC): $OUT"; fi
+# confirmed absence still works: no current context, readable kubeconfig, create switches it, restore unsets it
+setup_scenario "create, no prior context"; run up agentplane-t
+if [ $RC -eq 0 ] && [ -z "$(cur)" ] && printf '%s' "$OUT" | grep -q "current context is '<none>' (verified)"; then ok "a positively established absence of a current context is still handled and verified"; else bad "confirmed absence (rc=$RC, current='$(cur)'): $OUT"; fi
+# the real kubectl contract the stub models, on throwaway kubeconfig files (a local read; no cluster, no network)
+if command -v kubectl >/dev/null 2>&1; then
+  kc="$fix/kc"; mkdir -p "$kc"
+  printf 'apiVersion: v1\nkind: Config\nclusters: [{name: c1, cluster: {server: "https://127.0.0.1:1"}}]\nusers: [{name: u1, user: {}}]\ncontexts: [{name: ctx1, context: {cluster: c1, user: u1}}]\ncurrent-context: ctx1\n' >"$kc/set.yaml"
+  grep -v '^current-context' "$kc/set.yaml" >"$kc/unset.yaml"; : >"$kc/empty.yaml"; printf 'apiVersion: v1\nkind: Config\ncurrent-context: [unclosed\n' >"$kc/invalid.yaml"
+  real_ok=1
+  read_real() { KUBECONFIG="$1" kubectl config view -o 'jsonpath={.current-context}' 2>/dev/null; }
+  [ "$(read_real "$kc/set.yaml")" = "ctx1" ] || real_ok=0
+  for f in unset.yaml empty.yaml nonexistent.yaml; do KUBECONFIG="$kc/$f" kubectl config view -o 'jsonpath={.current-context}' >"$kc/out" 2>/dev/null; rc=$?; { [ $rc -eq 0 ] && [ ! -s "$kc/out" ]; } || real_ok=0; done
+  KUBECONFIG="$kc/invalid.yaml" kubectl config view -o 'jsonpath={.current-context}' >/dev/null 2>&1; [ $? -ne 0 ] || real_ok=0
+  [ "$real_ok" -eq 1 ] && ok "real kubectl: an unset, empty or missing kubeconfig reads as exit 0 with no output, a corrupt one as a nonzero exit (the contract the stub models)" || bad "real kubectl does not behave as the stub models"
+else ok "real-kubectl contract check skipped (kubectl not installed)"; fi
 
 names_ok=1
 for badname in "" "Agent" "a;b" "-a" "a-" "a b" 'a$(id)' "a/b"; do
