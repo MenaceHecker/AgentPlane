@@ -142,7 +142,10 @@ done
 # the list covers everything the scripts read from the environment, and the documentation names every entry
 script_inputs="$(grep -ohE '\$\{[A-Z][A-Z0-9_]+(:-|:=|-|:\?)' scripts/kind-cluster.sh scripts/scan-mock-image.sh scripts/check-go.sh scripts/scan-secrets.sh scripts/check-contracts.sh scripts/mock-smoke.sh | sed -E 's/^\$\{([A-Z0-9_]+).*/\1/' | sort -u)"
 for v in $script_inputs; do
-  case "$v" in SCAN_TRIVY_VERSION) continue ;; esac   # set by the recipe from IMAGE_SCANNER_VERSION, not an input
+  # Internal names, not inputs: SCAN_TRIVY_VERSION is set by the recipe from IMAGE_SCANNER_VERSION;
+  # CTX_NOW and CTX_ERR are the kind-cluster.sh context-read results. Any other name with a default
+  # form must be added to DATA_VARS (an input) or to this list (a decision, not an accident).
+  case "$v" in SCAN_TRIVY_VERSION|CTX_NOW|CTX_ERR) continue ;; esac
   if printf '%s\n' "$data_vars" | grep -qx "$v"; then ok; else bad "scripts read \$$v from the environment but it is not in DATA_VARS in the Makefile"; fi
 done
 for v in $data_vars; do
