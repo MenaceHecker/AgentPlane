@@ -26,7 +26,7 @@ CI**, and creating one on Linux or on amd64 hardware has not been tested.
 
 | Tool | Pin | Install |
 | --- | --- | --- |
-| Git, GNU Make, curl, python3 (3.8 or newer, standard library only) | any recent | OS package manager |
+| Git, GNU Make, curl, python3 | any recent; the sources state Python 3.8 or newer (standard library only), but 3.8 was **not tested**: only the versions in the table above were | OS package manager |
 | A POSIX host (macOS or Linux) | any recent | The smoke runner and the kind script are Python programs that start and collect their own child processes directly. They do not use `ps`, the shell job table, a PID file or a process-group signal ([ADR-007](adr/ADR-007-owned-process-supervision.md)), so there is no process-listing prerequisite |
 | Go | the `go` directive in `go.mod` (1.27.3) | https://go.dev/dl |
 | Docker (Desktop or Engine) | running daemon; cgroup v2 | https://docs.docker.com/get-docker |
@@ -145,36 +145,56 @@ rescan and record the digests in the run report.
 | `refusing to recreate '<name>' because its state could not be read` | The cluster exists but kubectl cannot read it (Docker paused, cluster stopped). Fix that first; nothing was changed. |
 | kubectl talks to the wrong cluster | Always pass `--context kind-<name>`; check `kubectl config current-context`. |
 | `could not restore your kubectl current context` | kubectl refused `use-context` or `unset`. Run the command the message prints, then check `kubectl config current-context`. The cluster itself was created or checked. |
-| `some child is lost, uncollected or unregistered, so the ... workdir <path> was kept for inspection` (smoke or kind), or `it could not be collected, so cleanup is incomplete` | The runner is the only process that collects its own children. It could not confirm that a child was collected, so it signalled nothing further and kept its private directory (it never deletes it recursively). A model server it started may still be running: look for it yourself (for example with your own `ps`), stop it by hand, inspect the kept directory, then delete the directory yourself. Nothing signals a PID found in a log. |
+| Smoke runner: `some child is lost, uncollected or unregistered, so the workdir <path> was kept for inspection` | The runner could not confirm that every child it started was collected, so it kept its private directory and did not delete it. Read the `children:` line in the output for each child's state. Before you stop anything or remove the directory, see "Manual inspection" below. |
+| Kind script: `some child is lost, uncollected or unregistered, so the private workdir <path> was kept for inspection`, together with `<tool>: lost ownership (<reason>); it was not signalled again and may still be running` or `<tool>: not collected within the reap deadline; cleanup is incomplete and it may still be running` | Same meaning for the kind script's own tools: ownership was lost or collection was not confirmed, the tool may still be running, and the directory was kept. See "Manual inspection" below. |
+| `<name> ignored SIGTERM and had to be killed` (kind script; the smoke runner reports the same condition in its failure list) | This is **timeout escalation, not lost ownership**: the runner sent SIGTERM, waited its bounded interval, sent SIGKILL and collected the child. The run fails, but the child is collected and nothing is left running by it. |
+| Kind script: `<command> did not finish within <N> s and was stopped`, optionally followed by `; it could not be collected, so cleanup is incomplete` | The command exceeded its deadline and the runner stopped it (bounded SIGTERM then SIGKILL). Without the suffix the child was collected. With the suffix, collection was not confirmed: treat it as the lost/uncollected case above. |
 | `Trivy 0.76.2 is required` or `SCAN_TRIVY_VERSION is not set` | Install the pinned Trivy and run through `make mock-image-scan`. |
 | scan: `NOT a pass` / `INVALID REPORT` | The database could not be downloaded or the report is unusable. Check network access to `mirror.gcr.io`/`ghcr.io` and rerun; a failed scan is never reported as clean. |
 | scan: `GATE FAILED` | A HIGH or CRITICAL finding has a fix. Update the base image or Go version and rebuild. |
 | `$VAR is set; it could change what Trivy reports` | Unset that `TRIVY_*` variable (only `TRIVY_CACHE_DIR` and `TRIVY_NO_PROGRESS` are allowed). |
 | `kind create` fails or nodes stay NotReady | Too little Docker memory or CPU, or cgroup v1. Raise Docker's limits and retry; do not edit the topology to make it fit. |
 
+### Manual inspection after a kept directory or a lost child
+
+The runner never recovers a child it no longer owns, never signals a process
+number found in a log, and never deletes a directory recursively. If you decide to
+act yourself, first **positively confirm** that the thing you are about to stop or
+remove is the one the failed run created: for a process, that its command line and
+start time match that run and it is not something else that reused the number; for
+a directory, that it is exactly the path the message printed, under your temporary
+directory, and holds only the files the tool writes. If you cannot confirm that,
+leave it alone and report it. Do not stop a process or delete a directory on a
+guess.
+
 ## Limitations
 
 - Local only; one tested host (macOS arm64). No Linux or amd64 cluster claim.
 - Labels and the taint are placement simulation, not isolation (no NetworkPolicy
   enforcement, no Pod Security, no policy engine yet).
-- Process supervision covers only the **direct children** that the smoke runner
-  or the kind script starts, as described in
-  [ADR-007](adr/ADR-007-owned-process-supervision.md). Each runner is the only
-  waiter and signaller for those children, and it never signals a child it has
-  already collected or lost. The limits: if the runner itself is killed (SIGKILL,
-  a crash, host failure or permanent suspension), nothing cleans up after it and
-  its model servers may keep running until they are stopped by hand; a child that
-  is still uncollectible after SIGKILL fails the run and is reported as incomplete
-  cleanup; grandchildren, daemonizing processes, hostile same-user code and the Go
-  build tool's own descendants are not covered; and the bounded deadlines apply to
-  responsive userspace operations, not to a stalled kernel.
+- Process supervision is described in [ADR-007](adr/ADR-007-owned-process-supervision.md);
+  this is a non-exhaustive summary and the ADR is authoritative. It covers only the
+  **direct children** that the smoke runner or the kind script starts. Each runner is
+  the only waiter and signaller for those children and never signals a child it has
+  already collected or lost. Not covered: the runner itself being killed (SIGKILL, a
+  crash, host failure or permanent suspension), after which nothing cleans up and
+  its model servers may keep running until stopped by hand; a child still
+  uncollectible after SIGKILL, which fails the run as incomplete cleanup;
+  grandchildren, daemonizing processes, reparenting tricks, other processes that
+  wait on the same children, an inherited SIGCHLD override, and hostile same-user
+  code. The `go build` preflight is a separate step with its own deadline, and the
+  Go compiler processes it starts are not tracked or given a kill guarantee. The
+  bounded deadlines apply to responsive userspace operations, not to a stalled
+  kernel.
 - The private temporary directories are removed by file descriptor, with a
   nonrecursive `rmdir`, and only when exactly the expected files are present. Any
   surprise keeps the directory and fails the run. A hostile same-user rename
   between the final check and the `rmdir` is outside the supported threat model.
-- The kind and smoke behavior described here was verified with stub tools and a
-  local mock model; the live kind lifecycle is recorded separately and is not part
-  of CI.
+- The persistent Python kind owner (`scripts/kind_cluster.py`) was verified with
+  stub tools only. A live kind lifecycle with the current Python owner is
+  **pending acceptance**; earlier live evidence recorded for the original Bash
+  script does not cover it. The smoke runner was verified with a real local mock
+  model. CI creates no kind cluster.
 - Scan results are a point-in-time record against the database downloaded at
   scan time and say nothing about future findings or about unscanned images.
 - The kind binary from Homebrew is not byte-identical to the upstream release

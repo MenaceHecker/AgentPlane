@@ -1,0 +1,47 @@
+# predecessor evidence, collected 2026-11-27T23:42:11Z against origin/main 556fab4ef91d1d31dfaf50a6463d396172205eca
+== gh pr view 2
+{"baseRefName":"main","headRefName":"phase-0/agent-protocol","mergeCommit":{"oid":"c458370df92229ebbb800bcaf1bc3e3f8f7330b6"},"mergedAt":"2026-11-23T00:03:58Z","number":2,"state":"MERGED","title":"Phase 0/agent protocol","url":"https://github.com/MenaceHecker/AgentPlane/pull/2"}
+== gh pr view 3
+{"baseRefName":"main","headRefName":"phase-0/repo-bootstrap","mergeCommit":{"oid":"dcb644c4b3d00e719e8f19998dcb43342022c14a"},"mergedAt":"2026-11-23T01:04:30Z","number":3,"state":"MERGED","title":"P0-T1: repository bootstrap (draft, CI evidence)","url":"https://github.com/MenaceHecker/AgentPlane/pull/3"}
+== c458370 ancestor-of-origin/main: yes
+   c458370 Tushar Mishra 2026-11-22 Merged pull request #2 from MenaceHecker/phase-0/agent-protocol
+== dcb644c ancestor-of-origin/main: yes
+   dcb644c Tushar Mishra 2026-11-22 Merged pull request #3 from MenaceHecker/phase-0/repo-bootstrap
+== f4fc4c3 ancestor-of-origin/main: yes
+   f4fc4c3 MenaceHecker 2026-11-22 docs(agents): correct P0-T0 existence-check record
+== 7d5d133 ancestor-of-origin/main: yes
+   7d5d133 MenaceHecker 2026-11-22 docs: update P0-T1 progress after review r1 fixes
+== c3474d4 ancestor-of-origin/main: no
+   c3474d4 MenaceHecker 2026-11-22 docs(agents): approve corrected P0-T0 evidence
+== a967194 ancestor-of-origin/main: no
+   a967194 MenaceHecker 2026-11-22 docs(agents): approve P0-T1 bootstrap review r2
+== 058f2d9 ancestor-of-origin/main: no
+   058f2d9 MenaceHecker 2026-11-22 docs: record P0-T1 review approval
+== merge parents
+PR2 merge c458370 parents: 1a0f6fca5b030a4eb3575ad663010c43cae14f7f f4fc4c35a38dff9114730792445fc3f53148a56c
+PR3 merge dcb644c parents: c458370df92229ebbb800bcaf1bc3e3f8f7330b6 7d5d133117facda4f264fe6215c13d60dd39716e
+== branches containing approval commits
+c3474d4: phase-0/agent-protocol 
+a967194: phase-0/repo-bootstrap 
+058f2d9: phase-0/repo-bootstrap 
+== diff: PR3 merged head 7d5d133 -> branch tip phase-0/repo-bootstrap
+ agents/reviews/P0-T1-r2.md | 59 ++++++++++++++++++++++++++++++++++++++++++++++
+ docs/PROGRESS.md           |  2 +-
+ 2 files changed, 60 insertions(+), 1 deletion(-)
+== diff: PR2 merged head f4fc4c3 -> approval commit c3474d4
+ agents/reviews/P0-T0-r1.md | 32 +++++++++++++++++++-------------
+ 1 file changed, 19 insertions(+), 13 deletions(-)
+== verdict on main: P0-T0-r1.md
+Verdict: CHANGES_REQUESTED
+== verdict at c3474d4: P0-T0-r1.md
+Verdict: APPROVE
+== P0-T1 r2 verdict at a967194
+Verdict: APPROVE
+== review files on main for P0-T0/P0-T1
+agents/reviews/P0-T0-r1.md
+agents/reviews/P0-T1-r1.md
+== tracker rows on main
+| P0-T0 | `phase-0/agent-protocol` | READY_FOR_REVIEW | — | 2026-11-26 |
+| P0-T1 | `phase-0/repo-bootstrap` | READY_FOR_REVIEW | [Draft PR #3](https://github.com/MenaceHecker/AgentPlane/pull/3) | 2026-11-26 |
+== exact-main CI
+{"conclusion":"success","headSha":"556fab4ef91d1d31dfaf50a6463d396172205eca","jobs":[{"conclusion":"success","name":"lint"},{"conclusion":"success","name":"unit-test"},{"conclusion":"success","name":"contracts"},{"conclusion":"success","name":"image"},{"conclusion":"success","name":"gitleaks"}],"status":"completed","url":"https://github.com/MenaceHecker/AgentPlane/actions/runs/46082844858"}

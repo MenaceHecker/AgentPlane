@@ -28,6 +28,13 @@ class RepeatRunnerTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="repeat-runner-test.")
         self.addCleanup(self._tmp.cleanup)
         self.dir = self._tmp.name
+        # A stand-in for the process-wide temp directory (what an uncontained in-process call would use).
+        # Nothing the runner creates may land here; tearDown asserts that before anything is cleaned up.
+        self._outer_tmp = tempfile.TemporaryDirectory(prefix="repeat-runner-outer.")
+        self.addCleanup(self._outer_tmp.cleanup)
+        self.outer = self._outer_tmp.name
+        self.addCleanup(setattr, tempfile, "tempdir", tempfile.tempdir)
+        tempfile.tempdir = self.outer
         self._saved_sigchld = signal.getsignal(signal.SIGCHLD)
         self.addCleanup(signal.signal, signal.SIGCHLD, self._saved_sigchld)
         self.owner = op.Owner()
@@ -36,6 +43,13 @@ class RepeatRunnerTests(unittest.TestCase):
         # and reap ITS children before it is itself killed; killing it first would orphan them.
         self.addCleanup(self.owner.close)
         self.addCleanup(lambda: self.owner.shutdown(20.0, 5.0))
+
+    def tearDown(self):
+        escaped = sorted(n for n in os.listdir(self.outer) if n.startswith("repeat-owned-process."))
+        self.assertEqual(escaped, [], "a repeat runner root escaped the test fixture into the process-wide temp directory")
+
+    def retained_roots(self):
+        return sorted(n for n in os.listdir(self.dir) if n.startswith("repeat-owned-process."))
 
     def run_runner(self, *args, timeout=60):
         log = os.path.join(self.dir, "runner-%d.log" % len(self.owner.children))
@@ -127,31 +141,25 @@ class RepeatRunnerTests(unittest.TestCase):
                 raise ChildProcessError(errno.ECHILD, "No child processes")
             def kill(self, pid, sig):
                 raise AssertionError("a lost child must never be signalled")
-        real = op.PosixAdapter
-        op.PosixAdapter = Lost
-        sys.path.insert(0, HERE)
-        import repeat_owned_process as rop
-        out = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(out):
-                rc = rop.main(["--runs", "1", "--timeout", "0.2", "--term-seconds", "0.1", "--kill-seconds", "0.1", "--", "x"])
-        finally:
-            op.PosixAdapter = real
-        text = out.getvalue()
+        rc, text = self.in_process(Lost, "--runs", "1", "--timeout", "0.2", "--term-seconds", "0.1", "--kill-seconds", "0.1", "--", "x")
         self.assertNotEqual(rc, 0)
         self.assertIn("0 reaped, 1 lost, 0 uncollected", text)
         self.assertNotIn("collected: yes", text)
         self.assertNotIn("OK\n", text.replace("PASS", ""))
+        self.assertEqual(len(self.retained_roots()), 1, "the genuine failure evidence must still be retained, inside the fixture")
 
     def in_process(self, adapter, *args):
         sys.path.insert(0, HERE)
         import repeat_owned_process as rop
         real, out = op.PosixAdapter, io.StringIO()
         op.PosixAdapter = adapter
+        saved_tempdir = tempfile.tempdir
+        tempfile.tempdir = self.dir                          # the runner's mkdtemp roots stay inside this fixture
         try:
             with contextlib.redirect_stdout(out):
                 rc = rop.main(list(args))
         finally:
+            tempfile.tempdir = saved_tempdir
             op.PosixAdapter = real
         return rc, out.getvalue()
 
@@ -173,6 +181,9 @@ class RepeatRunnerTests(unittest.TestCase):
         self.assertIn("0 reaped, 0 lost, 1 uncollected", out)
         self.assertEqual(kills, [signal.SIGTERM, signal.SIGKILL], "exactly one bounded escalation; no retries, no resets")
         self.assertIn("working directory kept for inspection", out)
+        roots = self.retained_roots()
+        self.assertEqual(len(roots), 1, "the kept working directory must exist, inside the fixture")
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, roots[0], "run01.log")))
         self.assertNotIn("run  2", out, "scheduling must stop after the uncollectible run")
 
     def test_descriptors_are_released_on_failing_in_process_runs(self):
