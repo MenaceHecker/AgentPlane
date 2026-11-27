@@ -173,6 +173,24 @@ class Workdir:
             os.close(fd)
             raise
 
+    def open_read(self, name):
+        """A NEW read-only descriptor for a manifest file (opened relative to the held directory, no-follow,
+        regular file only, same inode as recorded). Used to feed a captured output to a later command as
+        its stdin without a shell pipeline. The caller owns and must close it."""
+        self._open_check()
+        _check_name(name)
+        if name not in self._manifest:
+            raise WorkdirError("%r is not in the manifest" % name)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0), dir_fd=self._child_fd)
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or _ident(st) != self._manifest[name]:
+                raise WorkdirError("%r is not the file that was recorded" % name)
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+
     @property
     def manifest(self):
         return dict(self._manifest)

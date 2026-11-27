@@ -56,7 +56,7 @@ class FakeAdapter:
         self.kill_error = {}
         self.exit_after_next_wait = {}
 
-    def spawn(self, argv, log_fd, env):
+    def spawn(self, argv, log_fd, env, **io):
         self.serial += 1
         pid = self.forced_pids.pop(0) if self.forced_pids else self._fresh()
         held = self.procs.get(pid)
@@ -619,6 +619,101 @@ class FakeAdapterTests(OwnerTestCase):
         self.assertEqual(len(self.adapter.kills()), 2)
         self.assertFalse(owner.interrupt(a, signal.SIGTERM), "no signal after REAPED")
 
+    # --- regular-file command IO (kind runner) ---------------------------------------------------
+    def test_io_descriptors_are_passed_to_the_adapter_only_when_given_and_stay_non_inheritable(self):
+        owner = self.make()
+        seen = []
+        real = self.adapter.spawn
+
+        def spy(argv, log_fd, env, **kw):
+            seen.append(dict(kw, _log=log_fd))
+            for key, fd in kw.items():
+                self.assertFalse(os.get_inheritable(fd), key + " must not be inheritable")
+            self.assertFalse(os.get_inheritable(log_fd))
+            return real(argv, log_fd, env)
+        self.adapter.spawn = spy
+        owner.spawn(["a"], self.log_path("a"))
+        self.assertEqual(sorted(seen[0]), ["_log"], "no extra kwargs when no extra IO was requested")
+        src = os.path.join(self.dir, "in.txt")
+        with open(src, "w") as fh:
+            fh.write("input")
+        rfd = os.open(src, os.O_RDONLY)
+        efd = os.open(os.path.join(self.dir, "err.log"), os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o600)
+        self.addCleanup(os.close, rfd)
+        self.addCleanup(os.close, efd)
+        owner.spawn(["b"], self.log_path("b"), stdin_fd=rfd, stderr_fd=efd)
+        self.assertEqual(sorted(seen[1]), ["_log", "stderr_fd", "stdin_fd"])
+        self.assertNotIn(seen[1]["stdin_fd"], (rfd, efd), "the library must pass its own duplicates")
+
+    def test_stdin_must_be_a_readable_regular_file_and_stderr_a_regular_append_readwrite_file(self):
+        owner = self.make()
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        self.addCleanup(os.close, w)
+        d = os.open(self.dir, os.O_RDONLY)
+        self.addCleanup(os.close, d)
+        wo = os.open(os.path.join(self.dir, "wo.txt"), os.O_CREAT | os.O_WRONLY, 0o600)
+        self.addCleanup(os.close, wo)
+        ro = os.open(os.path.join(self.dir, "wo.txt"), os.O_RDONLY)
+        self.addCleanup(os.close, ro)
+        for bad in (r, d, wo):
+            with self.assertRaises(op.OwnershipError, msg="stdin %r" % bad):
+                owner.spawn(["x"], self.log_path("a"), stdin_fd=bad)
+        for bad in (r, d, ro, wo):                           # stderr: pipe, directory, read-only, write-only, none are append+readwrite
+            with self.assertRaises(op.OwnershipError, msg="stderr %r" % bad):
+                owner.spawn(["x"], self.log_path("b"), stderr_fd=bad)
+        self.assertEqual([e for e in self.adapter.log if e[0] == "spawn"], [])
+
+    def test_a_partial_io_setup_failure_leaks_no_descriptor_and_spawns_nothing(self):
+        if not os.path.isdir("/dev/fd"):
+            self.skipTest("no /dev/fd")
+        owner = self.make()
+        good = os.open(os.path.join(self.dir, "g.txt"), os.O_CREAT | os.O_RDWR, 0o600)
+        self.addCleanup(os.close, good)
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        self.addCleanup(os.close, w)
+        before = set(os.listdir("/dev/fd"))
+        for _ in range(3):
+            with self.assertRaises(op.OwnershipError):       # stdin is fine, stderr (a pipe) is not: the stdin dup must be closed
+                owner.spawn(["x"], self.log_path("c"), stdin_fd=good, stderr_fd=r)
+        self.assertEqual(set(os.listdir("/dev/fd")) - before, set(), "a descriptor leaked after a partial setup failure")
+        self.assertEqual([e for e in self.adapter.log if e[0] == "spawn"], [])
+
+    def test_a_failing_spawn_with_io_descriptors_closes_every_duplicate(self):
+        if not os.path.isdir("/dev/fd"):
+            self.skipTest("no /dev/fd")
+        owner = self.make()
+        rfd = os.open(os.path.join(self.dir, "in2.txt"), os.O_CREAT | os.O_RDONLY, 0o600)
+        efd = os.open(os.path.join(self.dir, "e2.log"), os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o600)
+        self.addCleanup(os.close, rfd)
+        self.addCleanup(os.close, efd)
+
+        def boom(argv, log_fd, env, **kw):
+            raise OSError(errno.ENOMEM, "fork failed")
+        self.adapter.spawn = boom
+        before = set(os.listdir("/dev/fd"))
+        with self.assertRaises(OSError):
+            owner.spawn(["x"], self.log_path("d"), stdin_fd=rfd, stderr_fd=efd)
+        self.assertEqual(set(os.listdir("/dev/fd")) - before, set())
+        self.assertEqual(owner.children, ())
+
+    def test_stderr_has_its_own_tail_and_close_releases_both_descriptors(self):
+        owner = self.make()
+        efd = os.open(os.path.join(self.dir, "e3.log"), os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o600)
+        self.addCleanup(os.close, efd)
+        child = owner.spawn(["x"], self.log_path("e"), stderr_fd=efd)
+        os.write(child._log_fd, b"to stdout")
+        os.write(child._err_fd, b"to stderr")
+        self.assertEqual(owner.log_tail(child), "to stdout")
+        self.assertEqual(owner.log_tail(child, stream="stderr"), "to stderr")
+        self.assertEqual(owner.log_read(child, 3, 4), b"stdo")
+        self.assertEqual(owner.log_read(child, 100, 4, stream="stderr"), b"")
+        with self.assertRaises(op.OwnershipError):
+            owner.log_tail(child, stream="stdin")
+        owner.close()
+        self.assertEqual((owner.log_tail(child), owner.log_tail(child, stream="stderr")), ("(log closed)", "(log closed)"))
+
     # --- signals and spawn ordering ---------------------------------------------------------------
     def test_interrupt_handlers_only_set_a_flag_and_keep_the_first_signal(self):
         owner = self.make()
@@ -827,6 +922,32 @@ class RealChildTests(OwnerTestCase):
             time.sleep(0.02)
         self.assertEqual(child.state, op.State.REAPED)
         self.assertEqual(child.exit_code, 7)
+
+    def test_a_real_child_reads_the_stdin_file_and_writes_separate_stdout_and_stderr_captures(self):
+        src = os.path.join(self.dir, "stdin.json")
+        with open(src, "w") as fh:
+            fh.write("PAYLOAD-123")
+        rfd = os.open(src, os.O_RDONLY)
+        efd = os.open(os.path.join(self.dir, "stderr.cap"), os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o600)
+        self.addCleanup(os.close, rfd)
+        self.addCleanup(os.close, efd)
+        child = self.owner.spawn(child_script("data = sys.stdin.read()\nprint('OUT:' + data)\nprint('ERR:' + data, file=sys.stderr)"),
+                                 self.log_path("io"), stdin_fd=rfd, stderr_fd=efd)
+        end = time.monotonic() + 10
+        while time.monotonic() < end and not child.done:
+            self.owner.poll(child)
+            time.sleep(0.02)
+        self.assertEqual(child.exit_code, 0, self.owner.log_tail(child, stream="stderr"))
+        self.assertEqual(self.owner.log_tail(child).strip(), "OUT:PAYLOAD-123")
+        self.assertEqual(self.owner.log_tail(child, stream="stderr").strip(), "ERR:PAYLOAD-123")
+
+    def test_stdin_is_the_null_device_by_default_and_unrelated_descriptors_are_not_inherited(self):
+        child = self.owner.spawn(child_script("print(repr(sys.stdin.read()))"), self.log_path("nullin"))
+        end = time.monotonic() + 10
+        while time.monotonic() < end and not child.done:
+            self.owner.poll(child)
+            time.sleep(0.02)
+        self.assertEqual(self.owner.log_tail(child).strip(), "''")
 
     def test_two_children_are_stopped_together_and_both_statuses_are_collected(self):
         script = "signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))\nprint('up', flush=True)\ntime.sleep(60)"

@@ -89,7 +89,7 @@ class OwnedChild:
     used for the kernel calls and is deliberately not exposed."""
 
     __slots__ = ("name", "argv", "log_path", "_owner", "_pid", "_state", "_exit_code",
-                 "_signal_number", "_escalated", "_lost_reason", "_log_fd", "_term_dl", "_kill_dl")
+                 "_signal_number", "_escalated", "_lost_reason", "_log_fd", "_err_fd", "_term_dl", "_kill_dl")
 
     def __init__(self, token, owner, name, argv, log_path, pid):
         if token is not _CREATE_TOKEN:
@@ -105,6 +105,7 @@ class OwnedChild:
         self._escalated = False
         self._lost_reason = None
         self._log_fd = None
+        self._err_fd = None       # separate stderr capture, when one was given
         self._term_dl = None      # this child's absolute graceful deadline, fixed by the first shutdown that includes it
         self._kill_dl = None
 
@@ -147,7 +148,7 @@ class PosixAdapter:
     """The only place that calls fork, waitpid and kill. Tests replace it with a fake that logs
     every call, so identity-related behaviour is tested without signalling a real process."""
 
-    def spawn(self, argv, log_fd, env):
+    def spawn(self, argv, log_fd, env, stdin_fd=None, stderr_fd=None):
         pid = os.fork()
         if pid == 0:   # the child: nothing here returns to the caller; every path ends in exec or _exit
             try:
@@ -155,10 +156,12 @@ class PosixAdapter:
                     signal.signal(sig, signal.SIG_DFL)
                 signal.pthread_sigmask(signal.SIG_SETMASK, [])   # undo the owner's block
                 os.setsid()
-                null = os.open(os.devnull, os.O_RDONLY)
-                os.dup2(null, 0)
+                if stdin_fd is None:
+                    os.dup2(os.open(os.devnull, os.O_RDONLY), 0)       # null stdin by default
+                else:
+                    os.dup2(stdin_fd, 0)                                 # a validated regular file the owner opened
                 os.dup2(log_fd, 1)
-                os.dup2(log_fd, 2)
+                os.dup2(log_fd if stderr_fd is None else stderr_fd, 2)
                 try:
                     limit = min(os.sysconf("SC_OPEN_MAX"), 65536)
                 except (ValueError, OSError):
@@ -229,6 +232,28 @@ class Owner:
         if type(child) is not OwnedChild or self._children.get(id(child)) is not child or child._owner is not self:
             raise OwnershipError("not a child spawned by this owner: no signal sent")
 
+    @staticmethod
+    def _dup_regular(fd, readable_only=False):
+        """Duplicate a caller descriptor after validating it: a regular file (not a pipe, directory or
+        device) with the right access mode. Returns the library-owned, non-inheritable duplicate."""
+        import fcntl
+        new = os.dup(fd)
+        try:
+            if not stat.S_ISREG(os.fstat(new).st_mode):
+                raise OwnershipError("a command descriptor must be a regular file")
+            fl = fcntl.fcntl(new, fcntl.F_GETFL)
+            acc = fl & os.O_ACCMODE
+            if readable_only:
+                if acc == os.O_WRONLY:
+                    raise OwnershipError("a stdin descriptor must be open for reading")
+            elif acc != os.O_RDWR or not fl & os.O_APPEND:
+                raise OwnershipError("a capture descriptor must be open O_RDWR|O_APPEND")
+            os.set_inheritable(new, False)
+            return new
+        except BaseException:
+            os.close(new)
+            raise
+
     def _log_descriptor(self, log_path, log_fd):
         """Return a library-owned, validated, non-inheritable regular-file descriptor opened for
         reading and appending. A path is created EXCLUSIVELY (an existing file, FIFO, device or
@@ -236,37 +261,51 @@ class Owner:
         a caller descriptor is duplicated, never trusted by number alone."""
         if (log_path is None) == (log_fd is None):
             raise OwnershipError("give exactly one of log_path or log_fd")
-        if log_path is not None:
-            flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK
-            fd = os.open(log_path, flags, 0o600)
-        else:
-            fd = os.dup(log_fd)
+        if log_path is None:
+            return self._dup_regular(log_fd)
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK
+        fd = os.open(log_path, flags, 0o600)
         try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode):
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise OwnershipError("the log must be a regular file")
-            if log_path is None:
-                import fcntl
-                fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-                if fl & os.O_ACCMODE != os.O_RDWR or not fl & os.O_APPEND:
-                    raise OwnershipError("a caller-supplied log descriptor must be open O_RDWR|O_APPEND")
             os.set_inheritable(fd, False)
             return fd
         except BaseException:
             os.close(fd)
             raise
 
-    def spawn(self, argv, log_path=None, name=None, env=None, log_fd=None):
+    def spawn(self, argv, log_path=None, name=None, env=None, log_fd=None, stdin_fd=None, stderr_fd=None):
         """Start argv (a list, no shell) and return its handle. stdout and stderr go to a regular log
         that this owner keeps open for bounded diagnostic reads: either log_path (created here,
         exclusively) or log_fd (a caller's O_RDWR|O_APPEND regular file, duplicated).
 
         The ownership record is RESERVED before the fork, so a failure after the fork cannot make a
         live child invisible: the record then carries the recovery result (REAPED, or LOST with the
-        reason) into every report, and the workdir decisions that read it."""
+        reason) into every report, and the workdir decisions that read it.
+
+        stdin_fd (optional) is a regular file open for reading that becomes the child's stdin (default:
+        the null device); stderr_fd (optional) is a separate regular O_RDWR|O_APPEND capture for stderr
+        (default: the same log as stdout). Both are duplicated, validated and non-inheritable; the
+        stdin duplicate is closed once the child exists, the stderr one is retained for tail reads."""
         if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(a, str) for a in argv):
             raise OwnershipError("argv must be a non-empty list or tuple of strings (a string would be split into characters)")
         fd = self._log_descriptor(log_path, log_fd)
+        in_fd = err_fd = None
+        try:
+            if stdin_fd is not None:
+                in_fd = self._dup_regular(stdin_fd, readable_only=True)
+            if stderr_fd is not None:
+                err_fd = self._dup_regular(stderr_fd)
+        except BaseException:                       # partial setup: nothing may leak
+            for d in (fd, in_fd, err_fd):
+                if d is not None:
+                    os.close(d)
+            raise
+        extra = {}
+        if in_fd is not None:
+            extra["stdin_fd"] = in_fd
+        if err_fd is not None:
+            extra["stderr_fd"] = err_fd
         old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, INTERRUPT_SIGNALS)
         child = None
         try:
@@ -276,13 +315,19 @@ class Owner:
                 self._children[id(child)] = child
                 self._order.append(child)
             except BaseException:
-                self._forget(child, fd)
+                self._forget(child, fd, err_fd)
+                if in_fd is not None:
+                    os.close(in_fd)
                 raise
             try:
-                pid = self._adapter.spawn(list(argv), fd, dict(os.environ) if env is None else env)
+                pid = self._adapter.spawn(list(argv), fd, dict(os.environ) if env is None else env, **extra)
             except BaseException:
-                self._forget(child, fd)          # the adapter contract: if it raises there is no child
+                self._forget(child, fd, err_fd)  # the adapter contract: if it raises there is no child
                 raise
+            finally:
+                if in_fd is not None:
+                    os.close(in_fd)              # the child has its own copy; the parent never needs it
+            child._err_fd = err_fd
             try:
                 self._adopt(child, pid)
             except BaseException:
@@ -292,17 +337,19 @@ class Owner:
             signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
         return child
 
-    def _forget(self, child, fd):
+    def _forget(self, child, fd, err_fd=None):
         """Undo a reservation when no child was ever created."""
         if child is not None:
             self._children.pop(id(child), None)
             if child in self._order:
                 self._order.remove(child)
             child._log_fd = None
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+        for d in (fd, err_fd):
+            if d is not None:
+                try:
+                    os.close(d)
+                except OSError:
+                    pass
 
     def _adopt(self, child, pid):
         child._pid = pid
@@ -333,12 +380,14 @@ class Owner:
     def close(self):
         """Close every retained log descriptor. Call after the last diagnostic read."""
         for child in self._order:
-            if child._log_fd is not None:
-                try:
-                    os.close(child._log_fd)
-                except OSError:
-                    pass
-                child._log_fd = None
+            for attr in ("_log_fd", "_err_fd"):
+                fd = getattr(child, attr)
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                    setattr(child, attr, None)
 
     @property
     def children(self):
@@ -475,14 +524,33 @@ class Owner:
                 failures.append("%s: exited with status %s, want 0" % (child.name, child.exit_code))
         return StopReport([ChildReport(c) for c in targets], failures)
 
-    def log_tail(self, child, limit=MAX_LOG_TAIL_BYTES):
-        """The last `limit` bytes of a child's log, read through the retained regular-file descriptor
-        (never by reopening a path). Bounded; never blocks."""
+    def _stream_fd(self, child, stream):
+        if stream not in ("stdout", "stderr"):
+            raise OwnershipError("stream must be 'stdout' or 'stderr'")
+        return child._err_fd if (stream == "stderr" and child._err_fd is not None) else child._log_fd
+
+    def log_tail(self, child, limit=MAX_LOG_TAIL_BYTES, stream="stdout"):
+        """The last `limit` bytes of a child's capture, read through the retained regular-file descriptor
+        (never by reopening a path). Bounded; never blocks. stream="stderr" reads the separate stderr
+        capture when one was given, else the shared log."""
         self._check(child)
-        if child._log_fd is None:
+        fd = self._stream_fd(child, stream)
+        if fd is None:
             return "(log closed)"
         try:
-            size = os.fstat(child._log_fd).st_size
-            return os.pread(child._log_fd, limit, max(0, size - limit)).decode("utf-8", "replace")
+            size = os.fstat(fd).st_size
+            return os.pread(fd, limit, max(0, size - limit)).decode("utf-8", "replace")
         except OSError as exc:
             return "(log unreadable: %s)" % exc
+
+    def log_read(self, child, offset, limit=65536, stream="stdout"):
+        """Up to `limit` bytes of a capture starting at `offset` (for streaming progress to a terminal).
+        Returns b"" at the end or when the capture is closed."""
+        self._check(child)
+        fd = self._stream_fd(child, stream)
+        if fd is None:
+            return b""
+        try:
+            return os.pread(fd, limit, offset)
+        except OSError:
+            return b""

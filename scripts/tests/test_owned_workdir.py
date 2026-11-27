@@ -335,6 +335,30 @@ class SetupTests(WorkdirTestCase):
         self.assertIn("refusing to fall back to paths", str(ctx.exception))
         self.assertEqual(os.listdir(self.root), [])
 
+    def test_open_read_returns_a_fresh_readonly_descriptor_for_a_manifest_file_only(self):
+        wd = self.make()
+        fd = wd.create_file("out.json")
+        os.write(fd, b"{\"k\": 1}")
+        os.close(fd)
+        r = wd.open_read("out.json")
+        self.addCleanup(os.close, r)
+        self.assertEqual(os.read(r, 100), b"{\"k\": 1}", "a fresh open file description starts at offset 0")
+        self.assertFalse(os.get_inheritable(r))
+        with self.assertRaises(OSError):
+            os.write(r, b"x")                                                  # read-only
+        for bad in ("unknown.json", "..", "a/b", ""):
+            with self.assertRaises(ow.WorkdirError, msg=repr(bad)):
+                wd.open_read(bad)
+        os.unlink(wd.file_path("out.json"))                                      # replaced by another regular file
+        with open(wd.file_path("out.json"), "wb") as fh:
+            fh.write(DECOY)
+        with self.assertRaises(ow.WorkdirError):
+            wd.open_read("out.json")
+        os.unlink(wd.file_path("out.json"))
+        os.symlink("/etc/hosts", wd.file_path("out.json"))                       # a symlink in its place
+        with self.assertRaises(OSError):
+            wd.open_read("out.json")
+
     def test_the_constructor_cannot_be_used_directly(self):
         with self.assertRaises(ow.WorkdirError):
             ow.Workdir(object(), 0, 0, "x", "/")
