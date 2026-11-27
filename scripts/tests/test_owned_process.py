@@ -121,14 +121,25 @@ class OwnerTestCase(unittest.TestCase):
         self.addCleanup(lambda: [signal.signal(s, h) for s, h in self._saved.items()])
 
     def log_path(self, name="child"):
-        return os.path.join(self.dir, name + ".log")
+        n = getattr(self, "_log_n", 0) + 1
+        self._log_n = n
+        return os.path.join(self.dir, "%s-%d.log" % (name, n))   # always a fresh path: logs are created exclusively
+
+    def track(self, owner, real=False):
+        """Register bounded cleanup for an owner BEFORE it spawns anything, so a failing assertion or an
+        ordinary exception cannot leave an owned child running (r3 finding 3). Cleanups run last-in
+        first-out; the shutdown is the bounded TERM/KILL sequence, never an unbounded wait."""
+        self.addCleanup(owner.close)
+        if real:
+            self.addCleanup(lambda: owner.shutdown(2.0, 3.0))
+        return owner
 
 
 class FakeAdapterTests(OwnerTestCase):
     def make(self):
         self.adapter = FakeAdapter()
         self.clock = FakeClock()
-        self.owner = op.Owner(self.adapter, self.clock.now, self.clock.sleep)
+        self.owner = self.track(op.Owner(self.adapter, self.clock.now, self.clock.sleep))
         return self.owner
 
     def pid_of(self, child_index=0):
@@ -212,7 +223,7 @@ class FakeAdapterTests(OwnerTestCase):
 
     def test_forged_foreign_and_non_handle_objects_send_no_signal(self):
         owner = self.make()
-        other = op.Owner(self.adapter, self.clock.now, self.clock.sleep)
+        other = self.track(op.Owner(self.adapter, self.clock.now, self.clock.sleep))
         mine = owner.spawn(["mine"], self.log_path("mine"))
         theirs = other.spawn(["theirs"], self.log_path("theirs"))
         for bad in (theirs, 5001, "child", None, object()):
@@ -333,6 +344,134 @@ class FakeAdapterTests(OwnerTestCase):
         self.assertTrue(report.ok)
         self.assertEqual(report.failures, [])
 
+    # --- r3 findings 4 and 5, and call-order evidence ------------------------------------------
+    def test_a_preexisting_fifo_log_is_refused_without_blocking_and_nothing_is_spawned(self):
+        owner = self.make()
+        fifo = os.path.join(self.dir, "fifo.log")
+        os.mkfifo(fifo)
+        start = time.monotonic()
+        with self.assertRaises(OSError):
+            owner.spawn(["x"], fifo)                      # O_EXCL|O_NONBLOCK: it fails instead of waiting for a reader
+        self.assertLess(time.monotonic() - start, 2.0, "opening a FIFO blocked")
+        self.assertEqual([e for e in self.adapter.log if e[0] == "spawn"], [])
+
+    def test_a_preexisting_regular_file_or_hardlink_log_is_refused(self):
+        owner = self.make()
+        existing = os.path.join(self.dir, "existing.log")
+        open(existing, "w").close()
+        link = os.path.join(self.dir, "hard.log")
+        os.link(existing, link)
+        for path in (existing, link):
+            with self.assertRaises(FileExistsError):
+                owner.spawn(["x"], path)
+        self.assertEqual([e for e in self.adapter.log if e[0] == "spawn"], [])
+
+    def test_a_caller_log_descriptor_must_be_a_regular_append_readwrite_file(self):
+        owner = self.make()
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        self.addCleanup(os.close, w)
+        with self.assertRaises(op.OwnershipError):          # a pipe is not a regular file
+            owner.spawn(["x"], log_fd=w)
+        ro = os.open(os.path.join(self.dir, "ro.log"), os.O_CREAT | os.O_RDONLY, 0o600)
+        self.addCleanup(os.close, ro)
+        with self.assertRaises(op.OwnershipError):
+            owner.spawn(["x"], log_fd=ro)
+        good = os.open(os.path.join(self.dir, "good.log"), os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o600)
+        self.addCleanup(os.close, good)
+        child = owner.spawn(["x"], log_fd=good)
+        self.assertEqual(child.state, op.State.OWNED)
+        with self.assertRaises(op.OwnershipError):          # both or neither
+            owner.spawn(["x"], self.log_path("both"), log_fd=good)
+        with self.assertRaises(op.OwnershipError):
+            owner.spawn(["x"])
+
+    def test_diagnostics_are_read_from_the_retained_descriptor_not_a_reopened_path(self):
+        owner = self.make()
+        path = self.log_path("tail")
+        child = owner.spawn(["x"], path)
+        os.write(child._log_fd, b"hello from the child")
+        os.unlink(path)                                      # the path is gone; the retained descriptor still reads
+        self.assertEqual(owner.log_tail(child), "hello from the child")
+        self.assertEqual(owner.log_tail(child, 5), "child")
+        owner.close()
+        self.assertEqual(owner.log_tail(child), "(log closed)")
+
+    def test_a_registration_failure_after_the_fork_does_not_leak_the_child(self):
+        owner = self.make()
+        real = op.OwnedChild.__init__
+
+        def broken(*a, **k):
+            raise MemoryError("injected: cannot build the handle")
+        op.OwnedChild.__init__ = broken
+        try:
+            with self.assertRaises(MemoryError):
+                owner.spawn(["x"], self.log_path("a"))
+        finally:
+            op.OwnedChild.__init__ = real
+        pid = self.pid_of(0)
+        self.assertEqual([k[2] for k in self.adapter.kills()], [signal.SIGKILL], "the unregistered child must be killed")
+        self.assertEqual(self.adapter.kills()[0][1], pid)
+        self.assertTrue(self.adapter.procs[pid]["collected"], "and collected by this owner")
+        self.assertEqual(owner.children, ())
+        self.assertEqual(set(signal.pthread_sigmask(signal.SIG_BLOCK, [])) & set(op.INTERRUPT_SIGNALS), set(), "the mask was not restored")
+
+    def test_a_failing_spawn_closes_the_log_descriptor_and_registers_nothing(self):
+        owner = self.make()
+        before = set(os.listdir("/dev/fd")) if os.path.isdir("/dev/fd") else None
+
+        def boom(argv, log_fd, env):
+            raise OSError(errno.EAGAIN, "fork failed")
+        self.adapter.spawn = boom
+        with self.assertRaises(OSError):
+            owner.spawn(["x"], self.log_path("a"))
+        self.assertEqual(owner.children, ())
+        if before is not None:
+            self.assertEqual(set(os.listdir("/dev/fd")), before, "a descriptor leaked")
+
+    def test_the_status_is_marked_reaped_before_it_is_decoded(self):
+        owner = self.make()
+        a = owner.spawn(["x"], self.log_path("a"))
+        self.adapter.exit_child(self.pid_of(0), 0)
+        real = op.decode_status
+
+        def boom(status):
+            raise RuntimeError("injected decoder failure")
+        op.decode_status = boom
+        try:
+            with self.assertRaises(RuntimeError):
+                owner.poll(a)
+        finally:
+            op.decode_status = real
+        self.assertEqual(a.state, op.State.REAPED, "REAPED must be set before anything else can fail")
+        self.assertFalse(owner.request_stop(a))
+        self.assertEqual(self.adapter.kills(), [])
+
+    def test_a_wait_immediately_precedes_every_term_and_every_kill_for_that_child(self):
+        owner = self.make()
+        owner.spawn(["a"], self.log_path("a"))
+        pid = self.pid_of(0)
+        self.adapter.term_behaviour[pid] = "ignore"
+        owner.shutdown(0.5, 0.5)
+        log = [e for e in self.adapter.log if e[0] in ("wait", "kill")]
+        kill_positions = [i for i, e in enumerate(log) if e[0] == "kill"]
+        self.assertEqual([log[i][2] for i in kill_positions], [signal.SIGTERM, signal.SIGKILL])
+        for i in kill_positions:
+            self.assertGreater(i, 0)
+            self.assertEqual(log[i - 1], ("wait", pid), "the poll of the same child must come right before the signal")
+
+    def test_a_second_stop_request_while_cleanup_is_pending_resets_nothing(self):
+        owner = self.make()
+        owner.spawn(["a"], self.log_path("a"))
+        self.adapter.term_behaviour[self.pid_of(0)] = "ignore"
+        self.adapter.unkillable.add(self.pid_of(0))
+        owner.shutdown(1.0, 1.0)                              # leaves the child KILL_SENT and uncollectible
+        t = self.clock.t
+        report = owner.shutdown(50.0, 50.0)                   # re-entered while cleanup is still pending
+        self.assertEqual(self.clock.t - t, 0.0, "the second call waited past the original deadlines")
+        self.assertFalse(report.ok)
+        self.assertEqual(len(self.adapter.kills()), 2, "no extra signal on re-entry")
+
     # --- signals and spawn ordering ---------------------------------------------------------------
     def test_interrupt_handlers_only_set_a_flag_and_keep_the_first_signal(self):
         owner = self.make()
@@ -409,7 +548,7 @@ def child_script(body):
 class RealChildTests(OwnerTestCase):
     def setUp(self):
         super().setUp()
-        self.owner = op.Owner()
+        self.owner = self.track(op.Owner(), real=True)
         self.bystanders = []
         self.addCleanup(self._reap_bystanders)
 
@@ -529,11 +668,11 @@ class RealChildTests(OwnerTestCase):
             time.sleep(0.02)
         self.assertEqual(child.exit_code, 0)
         self.assertLessEqual(len(self.owner.log_tail(child, limit=100)), 100)
-        self.assertGreaterEqual(os.path.getsize(child.log_path), 50010)
+        self.assertGreaterEqual(os.fstat(child._log_fd).st_size, 50010)
 
     def test_a_parent_that_ignored_sigchld_can_still_collect_a_real_child(self):
         signal.signal(signal.SIGCHLD, signal.SIG_IGN)
-        owner = op.Owner()
+        owner = self.track(op.Owner(), real=True)
         child = owner.spawn(child_script("sys.exit(7)"), self.log_path("ign"))
         end = time.monotonic() + 10
         while time.monotonic() < end and not child.done:

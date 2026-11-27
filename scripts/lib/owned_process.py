@@ -43,6 +43,7 @@ Standard library only; written for Python 3.8 or newer on POSIX.
 """
 import os
 import signal
+import stat
 import threading
 import time
 
@@ -87,7 +88,7 @@ class OwnedChild:
     used for the kernel calls and is deliberately not exposed."""
 
     __slots__ = ("name", "argv", "log_path", "_owner", "_pid", "_state", "_exit_code",
-                 "_signal_number", "_escalated", "_lost_reason")
+                 "_signal_number", "_escalated", "_lost_reason", "_log_fd")
 
     def __init__(self, token, owner, name, argv, log_path, pid):
         if token is not _CREATE_TOKEN:
@@ -102,6 +103,7 @@ class OwnedChild:
         self._signal_number = None
         self._escalated = False
         self._lost_reason = None
+        self._log_fd = None
 
     state = property(lambda self: self._state)
     exit_code = property(lambda self: self._exit_code)
@@ -226,25 +228,91 @@ class Owner:
         if type(child) is not OwnedChild or self._children.get(id(child)) is not child or child._owner is not self:
             raise OwnershipError("not a child spawned by this owner: no signal sent")
 
-    def spawn(self, argv, log_path, name=None, env=None):
-        """Start argv (a list, no shell) and return its handle. stdout and stderr go to log_path, an
-        owned regular file created here (a symlink is refused)."""
+    def _log_descriptor(self, log_path, log_fd):
+        """Return a library-owned, validated, non-inheritable regular-file descriptor opened for
+        reading and appending. A path is created EXCLUSIVELY (an existing file, FIFO, device or
+        symlink is refused and nothing can block: O_NONBLOCK makes a FIFO fail instead of waiting);
+        a caller descriptor is duplicated, never trusted by number alone."""
+        if (log_path is None) == (log_fd is None):
+            raise OwnershipError("give exactly one of log_path or log_fd")
+        if log_path is not None:
+            flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK
+            fd = os.open(log_path, flags, 0o600)
+        else:
+            fd = os.dup(log_fd)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise OwnershipError("the log must be a regular file")
+            if log_path is None:
+                import fcntl
+                fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                if fl & os.O_ACCMODE != os.O_RDWR or not fl & os.O_APPEND:
+                    raise OwnershipError("a caller-supplied log descriptor must be open O_RDWR|O_APPEND")
+            os.set_inheritable(fd, False)
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def spawn(self, argv, log_path=None, name=None, env=None, log_fd=None):
+        """Start argv (a list, no shell) and return its handle. stdout and stderr go to a regular log
+        that this owner keeps open for bounded diagnostic reads: either log_path (created here,
+        exclusively) or log_fd (a caller's O_RDWR|O_APPEND regular file, duplicated)."""
         if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(a, str) for a in argv):
             raise OwnershipError("argv must be a non-empty list or tuple of strings (a string would be split into characters)")
-        log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        fd = self._log_descriptor(log_path, log_fd)
         old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, INTERRUPT_SIGNALS)
+        pid = None
         try:
             try:
-                pid = self._adapter.spawn(list(argv), log_fd, dict(os.environ) if env is None else env)
-            finally:
-                os.close(log_fd)
-            # No interrupt can be acted on between the fork and this registration: they are blocked.
-            child = OwnedChild(_CREATE_TOKEN, self, name or argv[0], argv, log_path, pid)
-            self._children[id(child)] = child
-            self._order.append(child)
+                pid = self._adapter.spawn(list(argv), fd, dict(os.environ) if env is None else env)
+            except BaseException:
+                os.close(fd)                     # the adapter contract: if it raises there is no child
+                raise
+            # Registration comes FIRST after the fork and is the only step that can fail here. No
+            # interrupt can be acted on in between: they are blocked.
+            try:
+                child = OwnedChild(_CREATE_TOKEN, self, name or argv[0], argv, log_path or "<fd>", pid)
+                child._log_fd = fd
+                self._children[id(child)] = child
+                self._order.append(child)
+            except BaseException:
+                self._emergency_reap(pid)        # a child exists that no handle describes: do not leak it
+                os.close(fd)
+                raise
         finally:
             signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
         return child
+
+    def _emergency_reap(self, pid, seconds=5.0):
+        """Last resort for a child that was forked but could not be registered. Safe because this
+        process is its parent and has not collected it, so the number cannot belong to anyone else.
+        Bounded; failures are swallowed so the original exception is the one reported (a child that
+        cannot be collected may be orphaned: the documented limit for interpreter-level failures)."""
+        end = self._clock() + seconds
+        try:
+            self._adapter.kill(pid, signal.SIGKILL)
+        except BaseException:
+            return
+        while self._clock() < end:
+            try:
+                got, _ = self._adapter.waitpid_nohang(pid)
+            except BaseException:
+                return
+            if got:
+                return
+            self._sleep(POLL_STEP_SECONDS)
+
+    def close(self):
+        """Close every retained log descriptor. Call after the last diagnostic read."""
+        for child in self._order:
+            if child._log_fd is not None:
+                try:
+                    os.close(child._log_fd)
+                except OSError:
+                    pass
+                child._log_fd = None
 
     @property
     def children(self):
@@ -352,13 +420,13 @@ class Owner:
         return StopReport([ChildReport(c) for c in targets], failures)
 
     def log_tail(self, child, limit=MAX_LOG_TAIL_BYTES):
-        """The last `limit` bytes of a child's log, for diagnostics. Bounded; never blocks."""
+        """The last `limit` bytes of a child's log, read through the retained regular-file descriptor
+        (never by reopening a path). Bounded; never blocks."""
         self._check(child)
+        if child._log_fd is None:
+            return "(log closed)"
         try:
-            with open(child.log_path, "rb") as fh:
-                fh.seek(0, os.SEEK_END)
-                size = fh.tell()
-                fh.seek(max(0, size - limit))
-                return fh.read(limit).decode("utf-8", "replace")
+            size = os.fstat(child._log_fd).st_size
+            return os.pread(child._log_fd, limit, max(0, size - limit)).decode("utf-8", "replace")
         except OSError as exc:
             return "(log unreadable: %s)" % exc
