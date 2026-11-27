@@ -4,7 +4,8 @@ neither Go nor a build. It speaks just enough of the same protocol: --listen ADD
 invalid_request envelope for bad input and a 500 internal_error envelope with --error-rate=1.
 
 FAKE_MODE injects faults: ignore-term, exit-early, never-ready, no-address, bad-addr, nonzero-exit,
-nondeterministic, bad-usage, accept-invalid, ignore-error-rate. A watchdog ends the process after
+nondeterministic, bad-usage, accept-invalid, ignore-error-rate, trickle (a POST response that drips one
+byte per 0.2 s), stall (a POST that never answers), bad-done, usage-first, bad-content, bad-finish, bad-id. A watchdog ends the process after
 FAKE_EXIT_AFTER seconds (default 120) so a test that loses its runner can never leave it running. FAKE_NOTE_FILE: when set, the server appends its pid+mode there once ready.
 """
 import hashlib
@@ -73,6 +74,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(400, envelope("invalid_request", "bad request"))
         if ERROR_RATE >= 1 and MODE != "ignore-error-rate":
             return self.send(500, envelope("internal_error", "simulated failure"))
+        if MODE == "trickle" and req.get("messages"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            try:
+                for _ in range(300):
+                    self.wfile.write(b" ")
+                    self.wfile.flush()
+                    time.sleep(0.2)
+            except OSError:
+                pass
+            return
+        if MODE == "stall" and req.get("messages"):
+            time.sleep(60)
+            return
         canon = json.dumps({k: req.get(k) for k in ("model", "messages")}, sort_keys=True).encode()
         key, content = reply_for(canon)
         usage = {"prompt_tokens": 7, "completion_tokens": 5, "total_tokens": 12}
@@ -88,7 +104,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                   {"id": rid, "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}]},
                   {"id": rid, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
                   {"id": rid, "choices": [], "usage": usage}]
+        if MODE == "usage-first":
+            chunks = [chunks[3]] + chunks[:3]
+        if MODE == "bad-content":
+            chunks[1]["choices"][0]["delta"]["content"] = content + " tampered"
+        if MODE == "bad-finish":
+            chunks[2]["choices"][0]["finish_reason"] = "length"
+        if MODE == "bad-id":
+            chunks[1]["id"] = "mock-other"
         raw = "".join("data: " + json.dumps(c, separators=(",", ":")) + "\n\n" for c in chunks) + "data: [DONE]\n\n"
+        if MODE == "bad-done":
+            raw += "data: [DONE]\n\n"
         self.send(200, raw.encode(), "text/event-stream")
 
 

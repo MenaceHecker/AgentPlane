@@ -11,7 +11,9 @@ Run:  python3 -I -B -m unittest discover -s scripts/tests -p 'test_mock_smoke.py
 import errno
 import os
 import re
+import signal
 import sys
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,12 +32,19 @@ class HappyPathTests(SmokeCase):
             self.assertIn(line, out)
         self.assertEqual(self.workdirs_left(), [], "the workdir must be removed after success")
 
-    def test_one_final_usage_event_then_exactly_one_done_with_equal_content_usage_finish_and_id(self):
-        # The runner asserts these; prove it by breaking each one in turn.
-        child, out = self.run_runner(mode="bad-usage")
-        self.assertEqual(child.exit_code, 1, out)
-        self.assertIn("stream usage differs from the plain response", out)
-        self.assertEqual(self.workdirs_left(), [], "a check failure still cleans up its own workdir")
+    def test_each_stream_invariant_is_enforced_by_breaking_it_in_turn(self):
+        cases = (("bad-usage", "stream usage differs from the plain response"),
+                 ("bad-done", "[DONE] must appear exactly once"),
+                 ("usage-first", "exactly one usage chunk, immediately before [DONE]"),
+                 ("bad-content", "stream content differs from the plain response"),
+                 ("bad-finish", "finish reason differs"),
+                 ("bad-id", "chunk ids differ from the plain response id"))
+        for mode, message in cases:
+            with self.subTest(mode=mode):
+                child, out = self.run_runner(mode=mode)
+                self.assertEqual(child.exit_code, 1, out)
+                self.assertIn(message, out)
+                self.assertEqual(self.workdirs_left(), [], "a check failure still cleans up its own workdir")
 
     def test_non_identical_requests_fail(self):
         child, out = self.run_runner(mode="nondeterministic")
@@ -233,6 +242,130 @@ class InProcessTests(SmokeCase):
             time.sleep(0.25)
         else:
             self.fail("the fake server did not end by its own watchdog")
+
+
+class HttpDeadlineTests(SmokeCase):
+    def test_a_trickling_response_cannot_outlast_the_absolute_deadline(self):
+        start = time.monotonic()
+        child, out = self.run_runner("--http-timeout", "1", mode="trickle")
+        self.assertLess(time.monotonic() - start, 15.0, "a slow trickle outlasted the deadline")
+        self.assertEqual(child.exit_code, 1, out)
+        self.assertRegex(out, r"POST /v1/chat/completions on 127\.0\.0\.1:\d+ did not complete within 1\.0 s")
+        self.assertIn("main=REAPED(0)", out)
+        self.assertEqual(self.workdirs_left(), [])
+
+    def test_a_server_that_accepts_but_never_answers_hits_the_same_deadline(self):
+        start = time.monotonic()
+        child, out = self.run_runner("--http-timeout", "1", mode="stall")
+        self.assertLess(time.monotonic() - start, 15.0)
+        self.assertEqual(child.exit_code, 1, out)
+        self.assertIn("did not complete within 1.0 s", out)
+
+    def test_an_interrupt_during_a_slow_read_is_honoured_long_before_the_deadline(self):
+        note = os.path.join(self.tmp, "slow.note")
+        child = self.start_runner("--http-timeout", "120", mode="trickle", env={"FAKE_NOTE_FILE": note})
+        end = time.monotonic() + 30
+        while time.monotonic() < end and not (os.path.exists(note) and os.path.getsize(note) > 0):
+            self.owner.poll(child)
+            time.sleep(0.02)
+        time.sleep(1.0)                                         # the runner is now reading the trickle
+        start = time.monotonic()
+        self.assertTrue(self.owner.interrupt(child, signal.SIGTERM))
+        out = self.wait(child)
+        self.assertLess(time.monotonic() - start, 10.0, "the interrupt waited for the HTTP deadline")
+        self.assertEqual(child.exit_code, 143, out)
+        self.assertIn("interrupted by signal 15", out)
+        self.assertIn("main=REAPED(0)", out)
+        self.assertEqual(self.workdirs_left(), [])
+
+    def test_nonfinite_and_nonpositive_deadlines_are_refused(self):
+        for flag in ("--http-timeout", "--ready-timeout", "--address-timeout", "--build-timeout", "--term-seconds", "--kill-seconds"):
+            for bad in ("nan", "inf", "-1") + (("0",) if flag not in ("--term-seconds", "--kill-seconds") else ()):
+                child, out = self.run_runner(flag, bad)
+                self.assertEqual(child.exit_code, 2, "%s %s: %s" % (flag, bad, out))
+                self.assertIn("finite number", out)
+                self.assertEqual(self.workdirs_left(), [], "an invalid argument must be refused before anything is created")
+
+
+class BrokenOutput:
+    """A stdout whose writes start failing (a closed pipe) once a trigger text is seen."""
+    def __init__(self, trigger):
+        self.trigger, self.broken = trigger, False
+
+    def write(self, text):
+        if self.trigger in text:
+            self.broken = True
+        if self.broken:
+            raise BrokenPipeError(32, "Broken pipe")
+        return len(text)
+
+    def flush(self):
+        if self.broken:
+            raise BrokenPipeError(32, "Broken pipe")
+
+
+class OutputFailureTests(SmokeCase):
+    """Diagnostics must never skip cleanup (r4 finding 4)."""
+
+    def run_with_output(self, trigger, patches=None):
+        import tempfile
+        recorded = []
+
+        class Recording(mock_smoke.Smoke):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                recorded.append(self)
+        saved = (mock_smoke.Smoke, tempfile.tempdir, os.environ.get("FAKE_EXIT_AFTER"))
+        mock_smoke.Smoke = Recording
+        tempfile.tempdir = self.tmp
+        os.environ["FAKE_EXIT_AFTER"] = "60"
+        for k, v in (patches or {}).items():
+            setattr(Recording, k, v)
+        try:
+            rc = mock_smoke.main(["--server-cmd", FAKE_CMD], out=BrokenOutput(trigger))
+        finally:
+            mock_smoke.Smoke, tempfile.tempdir = saved[0], saved[1]
+            if saved[2] is None:
+                os.environ.pop("FAKE_EXIT_AFTER", None)
+            else:
+                os.environ["FAKE_EXIT_AFTER"] = saved[2]
+        return rc, recorded[0]
+
+    def assert_cleaned_up(self, smoke):
+        self.assertTrue(smoke.owner.children)
+        for c in smoke.owner.children:
+            self.assertEqual((c.state, c.exit_code), (op.State.REAPED, 0), c)
+        self.assertEqual(self.workdirs_left(), [], "the workdir must still be removed")
+        self.assertEqual(smoke.wd._child_fd, -1, "descriptors must still be released")
+
+    def test_output_that_closes_after_the_servers_started_still_cleans_up_and_fails(self):
+        rc, smoke = self.run_with_output("main ready on")
+        self.assertEqual(rc, 1, "a run whose diagnostics could not be written must not report success")
+        self.assertTrue(smoke.output_failed)
+        self.assert_cleaned_up(smoke)
+
+    def test_output_that_closes_while_reporting_the_result_still_cleans_up(self):
+        rc, smoke = self.run_with_output("children:")
+        self.assertEqual(rc, 1)
+        self.assert_cleaned_up(smoke)
+
+    def test_output_that_fails_while_printing_an_exceptions_traceback_still_cleans_up(self):
+        def boom(self, addr):
+            raise RuntimeError("injected failure after the servers are up")
+        rc, smoke = self.run_with_output("unexpected error", patches={"check_invalid": boom})
+        self.assertEqual(rc, 1)
+        self.assert_cleaned_up(smoke)
+
+    def test_a_failing_shutdown_step_does_not_skip_closing_descriptors_or_the_workdir_decision(self):
+        def boom(self, failures):
+            raise RuntimeError("injected: shutdown raised")
+        rc, smoke = self.run_with_output("never-matches", patches={"stop_and_verify": boom})
+        self.assertEqual(rc, 1)
+        self.assertEqual(smoke.wd._child_fd, -1, "workdir descriptors were not released")
+        self.assertEqual([c for c in smoke.owner.children if c._log_fd is not None], [], "log descriptors were not closed")
+        # the servers were never stopped by the injected failure; their own watchdog (60 s) ends them. Nothing may
+        # be signalled by PID from here: the shutdown that failed is exercised, not replaced.
+        smoke.owner.shutdown(10.0, 5.0)
 
 
 class WrapperTests(SmokeCase):

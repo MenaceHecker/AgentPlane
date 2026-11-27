@@ -24,8 +24,8 @@ nothing here finds them again; the Go build tool's own descendants are not given
 children are not tracked). Only loopback is contacted. Needs go (unless --server-cmd is given).
 """
 import argparse
-import http.client
 import json
+import math
 import os
 import re
 import socket
@@ -59,10 +59,17 @@ class Smoke:
         self.owner = None
         self.wd = None
         self.servers = {}
+        self.output_failed = False
+        self.main_addr = None
 
     # ---- plumbing -----------------------------------------------------------------------
     def say(self, msg):
-        print("mock-smoke: " + msg, file=self.out, flush=True)
+        """Diagnostics must never interrupt cleanup: an output failure (closed pipe, full disk) is
+        remembered, makes the run fail at the end, and is otherwise swallowed."""
+        try:
+            print("mock-smoke: " + msg, file=self.out, flush=True)
+        except (OSError, ValueError):
+            self.output_failed = True
 
     def fail(self, msg):
         raise SmokeFailure(msg)
@@ -133,7 +140,7 @@ class Smoke:
             try:
                 status, _ = self.http(addr["v"], "GET", "/readyz", None, timeout=2)
                 return status == 200
-            except (OSError, http.client.HTTPException):
+            except (OSError, SmokeFailure):                  # not up yet, or too slow: not ready (Interrupted passes through)
                 return False
 
         if not self.wait_until(self.args.ready_timeout, ready, 0.1):
@@ -143,24 +150,74 @@ class Smoke:
 
     # ---- bounded loopback HTTP ----------------------------------------------------------
     def http(self, addr, method, path, body, timeout=10):
+        """One HTTP/1.0 exchange with an ABSOLUTE monotonic deadline for the whole request (connect, send,
+        headers and body), a byte limit, and the stop flag checked every few milliseconds, so a slow trickle
+        or a stalled server can neither outlast the deadline nor delay an interrupt. HTTP/1.0 with
+        Connection: close means the body runs to EOF and is never chunk-framed, so the bytes are the
+        same ones a streaming client would reassemble."""
         host, _, port = addr.rpartition(":")
         if host != "127.0.0.1":
             self.fail("refusing to contact %s: only 127.0.0.1 is allowed" % addr)
-        conn = http.client.HTTPConnection(host, int(port), timeout=timeout)
+        deadline = time.monotonic() + timeout
+
+        def remaining():
+            self.check_interrupt()
+            left = deadline - time.monotonic()
+            if left <= 0:
+                self.fail("%s %s on %s did not complete within %.1f s" % (method, path, addr, timeout))
+            return left
+
+        request = ["%s %s HTTP/1.0" % (method, path), "Host: %s" % addr, "Connection: close"]
+        payload = b""
+        if body is not None:
+            payload = body
+            request += ["Content-Type: application/json", "Content-Length: %d" % len(payload)]
+        data = ("\r\n".join(request) + "\r\n\r\n").encode("ascii") + payload
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            headers = {"Content-Type": "application/json"} if body is not None else {}
-            conn.request(method, path, body=body, headers=headers)
-            resp = conn.getresponse()
-            data = resp.read(MAX_BODY + 1)
-            if len(data) > MAX_BODY:
-                self.fail("response to %s exceeded %d bytes" % (path, MAX_BODY))
-            return resp.status, data
+            sock.settimeout(min(remaining(), 0.1))
+            while True:                                         # connect, retrying only while the deadline allows
+                try:
+                    sock.connect((host, int(port)))
+                    break
+                except socket.timeout:
+                    remaining()
+            sent = 0
+            while sent < len(data):
+                sock.settimeout(min(remaining(), 0.1))
+                try:
+                    sent += sock.send(data[sent:])
+                except socket.timeout:
+                    continue
+            chunks, total = [], 0
+            while True:
+                sock.settimeout(min(remaining(), 0.1))
+                try:
+                    block = sock.recv(65536)
+                except socket.timeout:
+                    continue
+                if not block:
+                    break
+                chunks.append(block)
+                total += len(block)
+                if total > MAX_BODY + 65536:
+                    self.fail("response to %s exceeded %d bytes" % (path, MAX_BODY))
         finally:
-            conn.close()
+            sock.close()
+        raw = b"".join(chunks)
+        head, sep, rest = raw.partition(b"\r\n\r\n")
+        if not sep:
+            self.fail("%s %s on %s returned a malformed response (no header end)" % (method, path, addr))
+        m = re.match(rb"HTTP/1\.[01] (\d{3}) ", head)
+        if not m:
+            self.fail("%s %s on %s returned a malformed status line" % (method, path, addr))
+        if len(rest) > MAX_BODY:
+            self.fail("response to %s exceeded %d bytes" % (path, MAX_BODY))
+        return int(m.group(1)), rest
 
     def post(self, addr, payload):
         body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-        return self.http(addr, "POST", "/v1/chat/completions", body)
+        return self.http(addr, "POST", "/v1/chat/completions", body, timeout=self.args.http_timeout)
 
     # ---- the checks (the same assertions the Bash script made) ---------------------------
     def check_identical(self, addr):
@@ -244,62 +301,104 @@ class Smoke:
         return report
 
     def run(self):
+        """Run the checks, then ALWAYS the cleanup. The cleanup sits in a finally and is itself built from
+        nested finally blocks, so nothing a diagnostic, a check or an earlier cleanup step raises can skip
+        stopping the children, releasing the descriptors or deciding the workdir."""
         failures = []
-        interrupted = False
-        crashed = None
-        main_addr = None
+        state = {"interrupted": False}
         try:
-            self.checks()
-            main_addr = self.main_addr
-        except Interrupted:
-            interrupted = True
-        except SmokeFailure as exc:
-            failures.append(str(exc))
-        except BaseException as exc:                       # an ordinary exception still reaches cleanup
-            crashed = exc
-            failures.append("unexpected %s: %s" % (type(exc).__name__, exc))
-            self.say("unexpected error:\n" + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
-        report = self.stop_and_verify(failures)
-        if not failures and not interrupted and main_addr is not None:
             try:
-                self.http(main_addr, "GET", "/readyz", None, timeout=2)
-                failures.append("the main server still answers after shutdown")
-            except (ConnectionRefusedError, socket.timeout, OSError, http.client.HTTPException):
-                pass
-        children = self.owner.children
-        all_reaped = all(c.state == op.State.REAPED for c in children)
-        self.say("children: " + (", ".join("%s=%s(%s)" % (c.name, c.state, c.exit_code) for c in children) or "none"))
-        self.owner.close()
-        if self.wd is not None:
+                self.checks()
+            except Interrupted:
+                state["interrupted"] = True
+            except SmokeFailure as exc:
+                failures.append(str(exc))
+            except BaseException as exc:                   # an ordinary exception still reaches cleanup
+                failures.append("unexpected %s: %s" % (type(exc).__name__, exc))
+                self.say("unexpected error:\n" + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        finally:
+            self.cleanup(failures, state["interrupted"])
+        return self.result(failures, state["interrupted"])
+
+    def cleanup(self, failures, interrupted):
+        """Stop the children, close the descriptors, then remove the workdir only if every child was REAPED.
+        Each step is independent: a failure in one is recorded and the next still runs."""
+        try:
+            try:
+                self.stop_and_verify(failures)
+                if not failures and not interrupted and self.main_addr is not None:
+                    try:
+                        self.http(self.main_addr, "GET", "/readyz", None, timeout=2)
+                        failures.append("the main server still answers after shutdown")
+                    except (OSError, SmokeFailure, Interrupted):
+                        pass                                # refused, or too slow to answer: not answering
+            except BaseException as exc:
+                failures.append("shutdown raised %s: %s" % (type(exc).__name__, exc))
+        finally:
+            try:
+                children = self.owner.children
+                all_reaped = all(c.state == op.State.REAPED for c in children)
+                self.say("children: " + (", ".join("%s=%s(%s)" % (c.name, c.state, c.exit_code) for c in children) or "none"))
+            except BaseException as exc:
+                children, all_reaped = (), False
+                failures.append("could not read the children's final states (%s)" % exc)
+            try:
+                self.owner.close()
+            except BaseException as exc:
+                failures.append("closing the log descriptors raised %s: %s" % (type(exc).__name__, exc))
+            finally:
+                self.dispose_workdir(failures, all_reaped)
+
+    def dispose_workdir(self, failures, all_reaped):
+        if self.wd is None:
+            return
+        try:
             if all_reaped:
                 result = self.wd.cleanup()
                 if not result.ok:
                     failures.extend(result.failures)
             else:
-                failures.append("some child is lost or uncollected, so the workdir %s was kept for inspection" % self.wd.path)
-                self.wd._close_all()
-        if failures:
-            for f in failures:
-                self.say("FAIL: " + f)
+                failures.append("some child is lost, uncollected or unregistered, so the workdir %s was kept for inspection" % self.wd.path)
+        except BaseException as exc:
+            failures.append("workdir cleanup raised %s: %s" % (type(exc).__name__, exc))
+        finally:
+            self.wd._close_all()                            # descriptors are released whatever happened (idempotent)
+
+    def result(self, failures, interrupted):
+        for f in failures:
+            self.say("FAIL: " + f)
         if interrupted or self.owner.interrupted is not None:
             self.say("interrupted by signal %d; cleanup %s" % (self.owner.interrupted, "failed" if failures else "complete"))
             return self.owner.interrupt_exit_code
-        if failures:
+        if failures or self.output_failed:
             return 1
         self.say("both servers exited 0 on SIGTERM and every owned child was reaped")
         self.say("OK")
-        return 0
+        return 1 if self.output_failed else 0
+
+
+def finite(minimum, inclusive):
+    def parse(text):
+        try:
+            value = float(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError("%r is not a number" % text)
+        if not math.isfinite(value) or value < minimum or (value == minimum and not inclusive):
+            raise argparse.ArgumentTypeError("%r must be a finite number %s %g" % (text, ">=" if inclusive else ">", minimum))
+        return value
+    return parse
 
 
 def parse_args(argv):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--server-cmd", type=json.loads, default=None,
                    help="JSON list: the command prefix to run as the mock server instead of building one (tests)")
-    p.add_argument("--build-timeout", type=float, default=600.0)
-    p.add_argument("--address-timeout", type=float, default=15.0)
-    p.add_argument("--ready-timeout", type=float, default=10.0)
-    p.add_argument("--term-seconds", type=float, default=op.DEFAULT_TERM_SECONDS)
-    p.add_argument("--kill-seconds", type=float, default=op.DEFAULT_KILL_SECONDS)
+    p.add_argument("--build-timeout", type=finite(0, False), default=600.0)
+    p.add_argument("--address-timeout", type=finite(0, False), default=15.0)
+    p.add_argument("--ready-timeout", type=finite(0, False), default=10.0)
+    p.add_argument("--http-timeout", type=finite(0, False), default=10.0, help="absolute seconds allowed for each request/response")
+    p.add_argument("--term-seconds", type=finite(0, True), default=op.DEFAULT_TERM_SECONDS)
+    p.add_argument("--kill-seconds", type=finite(0, True), default=op.DEFAULT_KILL_SECONDS)
     args = p.parse_args(argv)
     if args.server_cmd is not None and (not isinstance(args.server_cmd, list) or not args.server_cmd
                                         or not all(isinstance(a, str) for a in args.server_cmd)):
