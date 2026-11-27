@@ -207,11 +207,30 @@ class RepeatRunnerTests(unittest.TestCase):
             self.assertEqual(child.exit_code, 2, "%s %s: %s" % (flag, bad, out))
             self.assertIn("finite number", out)
 
-    def test_test_counts_are_summed_across_every_suite_a_wrapper_runs(self):
+    def test_test_counts_are_parsed_from_bare_and_from_wrapped_summaries_without_double_counting(self):
         sys.path.insert(0, HERE)
         import repeat_owned_process as rop
-        self.assertEqual(rop.tests_ran("Ran 40 tests in 1s\nOK\nRan 22 tests in 0.1s\nRan 1 test in 0s\n"), 63)
-        self.assertIsNone(rop.tests_ran("no summary"))
+        bare = "Ran 40 tests in 1.285s\nOK\nRan 22 tests in 0.1s\nOK\nRan 1 test in 0s\n"
+        self.assertEqual(rop.tests_ran(bare), 63)
+        # Real wrapper output (copied from make smoke-cleanup-test and make kind-config-test runs).
+        wrapped = ("PASS  test_owned_process.py passes (Ran 55 tests in 1.285s)\n"
+                   "PASS  test_owned_workdir.py passes (Ran 23 tests in 0.069s)\n"
+                   "PASS  test_mock_smoke.py passes (Ran 26 tests in 29.018s)\n"
+                   "PASS  test_owned_process_integration.py passes (Ran 6 tests in 17.174s)\n"
+                   "owned-process self-test: all passed\n"
+                   "PASS  test_kind_cluster.py passes (Ran 25 tests in 12.512s)\n")
+        self.assertEqual(rop.tests_ran(wrapped), 55 + 23 + 26 + 6 + 25)
+        self.assertEqual(rop.tests_ran(wrapped + bare), 135 + 63, "forms mixed in one output are each counted once")
+        for none in ("", "no summary", "Ran tests", "I Ran 3 tests yesterday", "Ran 3 tests"):
+            self.assertIsNone(rop.tests_ran(none), none)
+
+    def test_a_wrapped_command_reports_a_count_not_none_end_to_end(self):
+        code = ("print('PASS  test_a.py passes (Ran 40 tests in 1.2s)'); print('PASS  test_b.py passes (Ran 2 tests in 0.1s)'); "
+                "print('owned-process self-test: all passed')")
+        child, out = self.run_runner("--runs", "2", *self.cmd(code))
+        self.assertEqual(child.exit_code, 0, out)
+        self.assertEqual(out.count("tests=42"), 2, out)
+        self.assertNotIn("tests=None", out)
 
     def test_an_interrupt_stops_the_runs_collects_every_child_and_exits_143(self):
         log = os.path.join(self.dir, "interrupted.log")

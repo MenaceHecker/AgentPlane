@@ -85,8 +85,11 @@ def parse_args(argv):
 
 
 def tests_ran(text):
-    """Sum every unittest "Ran N tests" summary (a wrapper such as make may run several suites)."""
-    counts = [int(n) for n in re.findall(r"^Ran (\d+) tests?", text, re.M)]
+    """Sum every unittest summary "Ran N tests in X.XXXs", wherever it sits in a line. A bare unittest run
+    prints it at the start of a line; the suite wrappers in this repository print it inside
+    "PASS  test_x.py passes (Ran N tests in X.XXXs)". Each suite prints exactly one of the two forms, so
+    nothing is counted twice. None means no summary was found, never zero."""
+    counts = [int(n) for n in re.findall(r"\bRan (\d+) tests? in [0-9]+(?:\.[0-9]+)?s\b", text)]
     return sum(counts) if counts else None
 
 
