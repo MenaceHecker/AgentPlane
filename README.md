@@ -43,7 +43,7 @@ The `Makefile` fails with an actionable message if gitleaks or golangci-lint is 
 | `deploy/` | `kind/` (local topology config and pins), plus `base/`, `platform/`, `tenants/` manifests |
 | `docs/` | Progress tracker, `adr/` decision records, `gateway/` OpenAPI contract, `audit/` record and checkpoint contracts |
 | `experiments/` | Experiment scripts; raw results go in `experiments/results/` |
-| `scripts/` | Check, cluster, image-scan and smoke scripts (`scripts/lib/` holds the owned-process helper and the scan evaluator) and the audit fixture reference calculation (`scripts/contracts/`) |
+| `scripts/` | Check, cluster, image-scan and smoke scripts (`scripts/lib/` holds the owned-child supervisor, the descriptor-owned workdir, the temp-directory helper and the scan evaluator) and the audit fixture reference calculation (`scripts/contracts/`) |
 
 Directories other than `agents/`, `api/`, `docs/`, `internal/` and `scripts/` are placeholders (`.gitkeep`) at this stage.
 
@@ -69,8 +69,8 @@ Override the name with `KIND_CLUSTER_NAME=<name>`. kind merges the new context i
 | `make secrets-history` | Scans every line ever added to `go.sum`. |
 | `make secrets-selftest` | Regression tests for the scanner itself: checksum lines pass, keys in `go.sum` and other files are detected, redaction holds, and scanner errors fail. |
 | `make mock-run` | Runs the deterministic mock chat model on loopback (see [`docs/mockmodel.md`](docs/mockmodel.md)). |
-| `make mock-smoke` | Starts a disposable mock server, checks determinism, streaming, validation and failures, and stops it. Needs go, curl and python3. |
-| `make smoke-cleanup-test` | Tests the owned-process helper the smoke script uses: bounded termination, a TERM-ignoring child, child identity rechecked before every signal, no wait on an unknown process state, partial-start and signal cleanup, unrelated processes surviving. Needs bash, python3 and a `ps` that supports `-o lstart`. |
+| `make mock-smoke` | Starts a disposable mock server, checks determinism, streaming, validation and failures, and stops it. Run by the foreground Python runner `scripts/mock_smoke.py` (the wrapper `scripts/mock-smoke.sh` only checks tools and execs it). Needs go and python3. |
+| `make smoke-cleanup-test` | Tests the temporary-directory helper (empty directories only; non-empty ones are retained, replacement decoys survive), guards that no process control or recursive deletion is reachable, and runs the Python suites: the sole-waiter ownership library, the descriptor-owned workdir, the smoke runner and its interrupt/cleanup lifecycles. Needs bash and python3 (3.8 or newer). |
 | `make make-args-test` | Tests that Make variables (cluster name, image, versions, mock flags) reach the scripts as data: quotes, substitutions and shell metacharacters in a value execute nothing, and invalid values are refused before any tool runs. Stub tools only. |
 | `make kind-config-test` | Tests the kind topology, node-shape checks and cluster targeting with stub tools (no Docker, no cluster). Needs go and python3. |
 | `make mock-image` | Builds the nonroot local image `agentplane/mockmodel:p0` (needs Docker; pushes nothing). |

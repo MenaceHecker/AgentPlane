@@ -90,7 +90,7 @@ mock-run: ## Run the deterministic mock model on loopback (Ctrl-C to stop; MOCK_
 	@go run ./cmd/mockmodel $$MOCK_ARGS
 
 .PHONY: mock-smoke
-mock-smoke: ## Start a disposable mock model, check determinism and streaming, stop it (needs go, curl, python3)
+mock-smoke: ## Start a disposable mock model, check determinism and streaming, stop and reap it (needs go, python3)
 	@scripts/mock-smoke.sh
 
 .PHONY: mock-image
@@ -114,7 +114,7 @@ supervisor-test: ## Unit tests of the owned-child supervision library (needs pyt
 	@python3 -I -m unittest discover -s scripts/tests -p 'test_repeat_owned_process.py' -v
 
 .PHONY: smoke-cleanup-test
-smoke-cleanup-test: ## Test the owned-process helper used by mock-smoke (needs bash and python3)
+smoke-cleanup-test: ## Test the temp-directory helper and the Python supervisor, workdir and smoke-runner suites (needs bash and python3)
 	@scripts/test-owned-process.sh
 
 .PHONY: secrets-history

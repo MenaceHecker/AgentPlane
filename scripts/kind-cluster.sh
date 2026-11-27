@@ -19,9 +19,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The temp directory is created and removed by the owned-process helper, which anchors
-# ownership to the physical path and the directory's identity (review P0-T5-r2, finding 4),
-# not to how TMPDIR is spelled.
+# The temp directory is created by the owned-process helper, anchored to the physical path
+# (review P0-T5-r2, finding 4). It is removed only when empty; see finish() below for the
+# temporary retention policy and its exit status.
 # shellcheck source=lib/owned-process.sh
 . scripts/lib/owned-process.sh
 
@@ -109,11 +109,18 @@ finish() {
       rc=1
     fi
   fi
-  # remove our temp dir last: the reads above write their error output into it. A refusal (the
-  # directory is not the one we created) leaves it alone and fails an otherwise successful run.
+  # The temp dir is removed last (the reads above write into it) and only if it is EMPTY: the Bash
+  # helper cannot hold a directory descriptor, so it never deletes a non-empty directory (review
+  # P0-T5-r3, finding 1; ADR-007). This script writes small work files there, so on every run the
+  # directory is RETAINED and cleanup is reported as failed. That is a temporary, explicit boundary,
+  # not a success: an operation that succeeded exits 3 ("succeeded, cleanup refused") so it can be
+  # told apart from a failed operation (1) and from a clean run (0). The retained directory is
+  # private (mode 0700, never printed or committed); inspect it and remove it yourself. Restoring
+  # automatic cleanup needs a persistent owner for this directory, which is separately planned.
   if ! op_remove_workdir; then
-    echo "kind-cluster: ERROR: the temp directory was not removed (see above)." >&2
-    if [ "$rc" -eq 0 ]; then rc=1; fi
+    echo "kind-cluster: ERROR: the private temp directory was NOT removed and is retained for inspection: $OP_WORKDIR" >&2
+    echo "kind-cluster: its contents are not printed; remove it yourself once you have inspected it (see docs/local-development.md)." >&2
+    if [ "$rc" -eq 0 ]; then rc=3; fi
   fi
   exit "$rc"
 }

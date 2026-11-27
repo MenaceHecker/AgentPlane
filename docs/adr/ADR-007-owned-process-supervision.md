@@ -1,6 +1,6 @@
 # ADR-007: Owned-child supervision for the local smoke harness
 
-Status: Accepted (the foreground-runner migration; the explicit supervisor-death and unreapable-child limits; the added ADR and test files); the ownership state machine's details and the workdir-removal safeguard Proposed or open
+Status: Accepted (the foreground-runner migration; the explicit supervisor-death and unreapable-child limits; the added ADR and test files); the ownership state machine's details Proposed; workdir removal follows the r3 option (b) decision below (owner-approved to implement, not a Codex APPROVE)
 Requirements: NFR-8 (local foundation); resolves P0-T4 review r1 finding 4 and P0-T5 reviews r1 and r2 (finding 1)
 Plan: [P0-T5](../../agents/plans/P0-T5.md), section "Supervisor revision"
 
@@ -45,15 +45,26 @@ Any design that signals a numeric PID from outside the process that owns the chi
 - Only directly owned, non-daemonizing mock processes are covered. Arbitrary descendants, hostile same-user code, reparenting tricks, external waiters and inherited SIGCHLD overrides are unsupported, and Go's build tool and its descendants get no kill guarantee. The Go build stays a disclosed preflight outside the model shutdown deadline.
 - The identity invariant itself is **not** relaxed: no signal after reaping or on lost ownership.
 
+### Workdir removal (follow-up, P0-T5 r3, option (b); implemented in `scripts/lib/owned_workdir.py`)
+Provenance: Codex selected the design in `agents/reviews/P0-T5-r3.md` (section "R3 decision") at the owner's request, and the owner then confirmed approval of option (b) and the temporary Bash retention/failure policy **to implement**, not to merge or complete P0-T5. The earlier quote "I approve, commit, push and merge with main" covers the original supervisor revision only and is not the provenance for this follow-up.
+
+Why the earlier safeguard failed: a device and inode recorded for a directory do not identify it once it is gone. On ext4 and overlayfs a replacement directory of the same name received the identical pair in 199 of 200 and 200 of 200 trials, and the Bash helper removed the replacement (`agents/runs/P0-T5.md`, "Linux CI failure"). Holding a descriptor on the original directory prevented reuse in every trial (0 of 600).
+
+Decision: the runner owns the workdir through descriptors held for its whole life (the physical parent and the created 0700 child, non-inheritable), never through a recorded number. Only fixed single-component names in a manifest are created or adopted; cleanup first verifies (parent entry names the held child, physical parent unchanged, exactly the manifest names, each the recorded regular file and not a symlink) and then unlinks those files through the child descriptor and removes the empty directory with a nonrecursive rmdir through the parent descriptor. Any mismatch retains everything and fails the run. There is no recursion anywhere. Limit, stated plainly: POSIX has no compare-and-remove by directory descriptor, so a hostile same-user rename between the final check and the rmdir is outside the supported threat model; a non-empty replacement is still protected because rmdir fails on it. The device and inode comparison is kept only as a diagnostic.
+
+Temporary Bash policy: the Bash helper has no persistent descriptor owner, so it removes an **empty** directory only (nonrecursive rmdir) and refuses and retains every non-empty one, with a diagnostic that does not print the contents. Its process API is retired. The one remaining caller, `scripts/kind-cluster.sh`, therefore keeps its private temp directory on every run and exits 3 when the operation itself succeeded (1 for a failed operation). **This does not satisfy kind cleanup acceptance**: restoring automatic cleanup needs a persistent Python owner for that directory's whole lifetime, which is separately planned and not part of this decision.
+
+The word "always" earlier in this ADR (a run that "always stops what it started") applies within the stated limits above: supervisor death, an uncollectible child and hostile same-user action are not covered.
+
 ### Open (not decided here)
-- **Workdir removal safeguard.** The runner must remove only its own workdir. The reviewed safeguard for that, the helper's device and inode comparison in `scripts/lib/owned-process.sh`, does not hold on filesystems that reuse a freed inode: on ext4 and overlayfs a replacement directory of the same name received the identical identity in 199 of 200 and 200 of 200 trials, and the helper removed the replacement (`agents/runs/P0-T5.md`, "Linux CI failure"). Holding a descriptor on the original directory prevented reuse in every trial (0 of 600). What identity the removal must check is **a planner decision that has not been made**; until it is, the runner's workdir removal is not implemented and the Python migration of the smoke runner is blocked.
+- Automatic cleanup of the kind caller's temp directory (see above).
 - The Go toolchain and CVE-2026-97054, and the added Go topology checker, are separate and not settled by this ADR.
 
 ## Consequences
 - The reproduced replacement case and the check-then-signal gap disappear for the supervised children: after collection the object is terminal even if a later spawn receives the same number.
 - Observation no longer depends on two non-atomic reads, so the Linux false failures of the Bash helper go away with the helper.
 - Harder: smoke assertions move from Bash and curl to Python's standard library, the Bash process API and its tests are retired (their obligations are mapped to new tests, not dropped), and the harness cannot clean up after its own death.
-- Unchanged: the filesystem helpers used by `kind-cluster.sh`, the product code, and every contract.
+- Changed: `kind-cluster.sh` now retains its temp directory and exits 3 on a successful operation (temporary). Unchanged: the product code and every contract.
 
 ## Requirement mapping
 | Requirement | How this decision addresses it | Enforced at (phase / component) |
@@ -62,8 +73,8 @@ Any design that signals a numeric PID from outside the process that owns the chi
 | P0-T4 r1 finding 4, P0-T5 r1 and r2 finding 1 | Replaces PID signalling from outside the owner with sole-waiter ownership | Phase 0, same |
 
 ## Validation
-Planned, not yet run (see the plan's acceptance commands): unit tests with a fake adapter that logs every wait and signal (retained identity before reap, same-parent same-second replacement, reuse of an old PID by a new spawn, repeated stop, forged and foreign handles, exit between poll and signal, no signal after REAPED, ECHILD to LOST, no unrelated wait); real-child cases (clean TERM, nonzero exit, early exit, TERM ignored then KILL, status collection); smoke and integration tests with INT, TERM and HUP before startup, during readiness and during cleanup; repeated and concurrent runs; mutations classified only after they parse. Nothing in this ADR is a measured result.
+Run results are recorded in `agents/runs/P0-T5.md`; this ADR states no measured number itself. Tests: `scripts/tests/test_owned_process.py` (fake adapter and real children), `test_owned_workdir.py` (replacement, inode reuse injected and probed, symlinks, unknown entries, descriptor closure), `test_mock_smoke.py` and `test_owned_process_integration.py` (the foreground runner as a child the test owns: INT, TERM and HUP before startup, during readiness and during cleanup, a failed second spawn, ordinary exceptions, a TERM-ignoring server, a lost child, and a killed supervisor reported as a documented limit), `test_repeat_owned_process.py`, plus the Bash directory and static-guard cases in `scripts/test-owned-process.sh`.
 
 ## Owner acceptance
 - Evidence: `agents/plans/P0-T5.md`, section "Owner approval and directed merge": the owner approved the concrete revision in session with the words "I approve, commit, push and merge with main", covering the foreground-runner migration instead of per-child IPC supervisors, the crash and unreapable-child limitations, and the added ADR and test files. The same section states that this is not technical approval of the implementation and not a Codex verdict.
-- Accepted by owner: partly. Accepted: option A, the stated limits, the added files. Proposed: the state machine and spawn details above. Open: the workdir-removal safeguard, the Go toolchain and CVE, and the Go checker.
+- Accepted by owner: partly. Accepted: option A, the stated limits, the added files; later, to implement: workdir option (b) and the temporary Bash policy. Proposed: the state machine and spawn details above. Open: kind cleanup acceptance, the Go toolchain and CVE, and the Go checker.

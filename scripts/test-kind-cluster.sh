@@ -142,7 +142,16 @@ reset() { # reset PRIOR_CONTEXT CLUSTERS...
   export STUB_NODES="$fix/nodes-good.json"
 }
 run() { # run MODE NAME -> OUT, RC
-  OUT="$(PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh "$@" 2>&1)"; RC=$?
+  # The script keeps its private temp directory (temporary policy, P0-T5 r3): an operation that succeeded
+  # exits 3 and says so. The legacy assertions below are about the OPERATION, so a "succeeded, directory
+  # retained" run is mapped to RC=0 here and the retention itself is asserted separately (see the end of
+  # this file); a failed operation keeps its own status. Retained directories live in the fixture and are
+  # removed by this test, which created the area.
+  mkdir -p "$fix/runtmp"
+  OUT="$(TMPDIR="$fix/runtmp" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh "$@" 2>&1)"; RC=$?
+  RAW_RC=$RC; RETAINED_DIRS="$(ls "$fix/runtmp" 2>/dev/null | grep -c '^kind-cluster\.')"
+  if [ "$RC" -eq 3 ] && printf '%s' "$OUT" | grep -q 'was NOT removed and is retained'; then RC=0; fi
+  for d in "$fix"/runtmp/kind-cluster.*; do [ -d "$d" ] && rm -rf -- "$d"; done   # the test's own fixture area
 }
 count() { grep -c -- "$1" "$ST/log" || true; }   # count log lines matching a fixed string
 cur() { cat "$ST/current"; }
@@ -267,12 +276,29 @@ if command -v kubectl >/dev/null 2>&1; then
   [ "$real_ok" -eq 1 ] && ok "real kubectl: an unset, empty or missing kubeconfig reads as exit 0 with no output, a corrupt one as a nonzero exit (the contract the stub models)" || bad "real kubectl does not behave as the stub models"
 else ok "real-kubectl contract check skipped (kubectl not installed)"; fi
 
-# --- the script's own temp directory: retargeting the TMPDIR symlink mid-run must not redirect its removal
+# --- the script's own temp directory: retargeting the TMPDIR symlink mid-run must not redirect anything.
+# Under the temporary retention policy the script's own (non-empty) directory is RETAINED in A, not removed,
+# and the same-named decoy in B must be untouched; the run reports "succeeded, cleanup refused" (3).
 rt="$fix/retarget"; mkdir -p "$rt/A" "$rt/B"; ln -s "$rt/A" "$rt/link"
 reset "$PRIOR" agentplane-t
 OUT="$(TMPDIR="$rt/link" STUB_RETARGET_LINK="$rt/link" STUB_RETARGET_FROM="$rt/A" STUB_RETARGET_TO="$rt/B" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh up agentplane-t 2>&1)"; RC=$?
 decoys="$(ls "$rt/B" | grep -c '^kind-cluster\.')"; leftovers="$(ls "$rt/A" | grep -c '^kind-cluster\.')"
-if [ $RC -eq 0 ] && [ "$decoys" -eq 1 ] && [ -f "$rt/B/$(ls "$rt/B" | grep '^kind-cluster\.' | head -1)/decoy" ] && [ "$leftovers" -eq 0 ]; then ok "kind-cluster.sh: a TMPDIR symlink retargeted mid-run removes the script's own directory (in A) and leaves the same-named decoy in B"; else bad "retargeted TMPDIR (rc=$RC, decoys=$decoys, leftovers in A=$leftovers): $OUT"; fi
+if [ $RC -eq 3 ] && [ "$decoys" -eq 1 ] && [ -f "$rt/B/$(ls "$rt/B" | grep '^kind-cluster\.' | head -1)/decoy" ] && [ "$leftovers" -eq 1 ]; then ok "kind-cluster.sh: a TMPDIR symlink retargeted mid-run leaves the same-named decoy in B untouched and retains the script's own directory in A (exit 3)"; else bad "retargeted TMPDIR (rc=$RC, decoys=$decoys, retained-in-A=$leftovers): $OUT"; fi
+
+# --- the retention contract itself (temporary policy, review P0-T5-r3 finding 1)
+reset "$PRIOR" agentplane-t; mkdir -p "$fix/rtn"
+OUT="$(TMPDIR="$fix/rtn" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh up agentplane-t 2>&1)"; RC=$?
+kept="$(ls "$fix/rtn" | grep '^kind-cluster\.' | head -1)"
+mode="$(stat -c '%a' "$fix/rtn/$kept" 2>/dev/null || stat -f '%Lp' "$fix/rtn/$kept" 2>/dev/null)"
+if [ $RC -eq 3 ] && [ -n "$kept" ] && [ "$mode" = 700 ] && printf '%s' "$OUT" | grep -q "retained for inspection: .*/$kept" && [ -n "$(ls -A "$fix/rtn/$kept")" ]; then ok "a successful run exits 3, names the retained private (0700) directory and does not remove it"; else bad "retention contract (rc=$RC kept='$kept' mode=$mode): $OUT"; fi
+if ! printf '%s' "$OUT" | grep -q 'ctx.err'; then ok "the retained directory's contents are not printed"; else bad "the retained directory's contents were printed"; fi
+rm -rf -- "${fix:?}/rtn"   # the test's own fixture area
+# a FAILED operation keeps its own status and message and still reports the retention
+reset "$PRIOR" agentplane-t; mkdir -p "$fix/rtn"; export STUB_GET_CLUSTERS_FAIL=1
+OUT="$(TMPDIR="$fix/rtn" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh down agentplane-t 2>&1)"; RC=$?
+unset STUB_GET_CLUSTERS_FAIL
+if [ $RC -eq 1 ] && printf '%s' "$OUT" | grep -q "'kind get clusters' failed" && printf '%s' "$OUT" | grep -q 'was NOT removed and is retained'; then ok "an earlier failure keeps its status 1 and message; the refused cleanup is reported as well, never turned into success"; else bad "failure plus retention (rc=$RC): $OUT"; fi
+rm -rf -- "${fix:?}/rtn"
 
 names_ok=1
 for badname in "" "Agent" "a;b" "-a" "a-" "a b" 'a$(id)' "a/b"; do
