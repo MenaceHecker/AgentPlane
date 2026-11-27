@@ -4,7 +4,7 @@ AgentPlane is a multi-tenant platform on Azure Kubernetes Service (AKS) where te
 
 ## Status
 
-**Phase 0 (foundations).** Nothing described above is running yet. This repository contains the agent workflow documents, ADRs, local tooling, the Go module with the Tenant and Agent API types (`api/v1alpha1`, types only: no CRD manifests, controllers or admission validation), and the gateway and audit contracts with fixtures and checks (`docs/gateway`, `docs/audit`). No controller, gateway, audit store, signer or cloud infrastructure exists, and no performance, coverage or cost numbers have been measured.
+**Phase 0 (foundations).** Nothing described above is running yet. This repository contains the agent workflow documents, ADRs, local tooling, the Go module with the Tenant and Agent API types (`api/v1alpha1`, types only: no CRD manifests, controllers or admission validation), the gateway and audit contracts with fixtures and checks (`docs/gateway`, `docs/audit`), a deterministic mock chat model with a local image, and a labeled local kind topology. No controller, gateway, audit store, signer or cloud infrastructure exists, and no performance or cost numbers have been measured. The local workflow is in [`docs/local-development.md`](docs/local-development.md).
 
 Progress is tracked in [`docs/PROGRESS.md`](docs/PROGRESS.md). Requirements live in `AgentPlane_Requirements_and_Phased_Plan.docx` at the repo root (currently untracked, managed by the owner). Phases 0-3 run on a local kind cluster only; no cloud resources are used before Phase 4.
 
@@ -14,7 +14,7 @@ Go (Kubebuilder/controller-runtime), Terraform (azurerm), Flux, Argo Rollouts, O
 
 ## Prerequisites
 
-Git, GNU Make, Docker and kind for the local cluster; plus the pinned quality tooling below.
+Git, GNU Make, Docker, kind v0.31.0 and kubectl for the local cluster; plus the pinned quality tooling below. Trivy 0.76.2 is needed only for the image scan. Full prerequisites, the tested host and troubleshooting: [`docs/local-development.md`](docs/local-development.md).
 
 | Tool | Pinned version | Install |
 | --- | --- | --- |
@@ -35,14 +35,15 @@ The `Makefile` fails with an actionable message if gitleaks or golangci-lint is 
 | `internal/contractcheck/` | Test-only validation of the gateway and audit contracts |
 | `controllers/` | Tenant and Agent controllers (Phase 1) |
 | `gateway/` | LLM and tool gateway (Phase 2) |
-| `mockmodel/`, `cmd/mockmodel/` | Deterministic mock chat model and its command (P0-T4; see `docs/mockmodel.md`) |
+| `mockmodel/`, `cmd/mockmodel/` | Deterministic mock chat model, its command and its `Dockerfile` (see `docs/mockmodel.md`) |
+| `internal/kindshape/`, `cmd/kindshape/` | Derives the expected kind topology from `deploy/kind/config.yaml` and checks a cluster's nodes against it |
 | `audit/` | Audit hash-chain library and CLI (Phase 2) |
 | `policy/` | Gatekeeper policies (Phase 3) |
 | `infra/terraform/` | Azure infrastructure (Phase 4) |
-| `deploy/` | `base/`, `platform/`, `tenants/` manifests |
+| `deploy/` | `kind/` (local topology config and pins), plus `base/`, `platform/`, `tenants/` manifests |
 | `docs/` | Progress tracker, `adr/` decision records, `gateway/` OpenAPI contract, `audit/` record and checkpoint contracts |
 | `experiments/` | Experiment scripts; raw results go in `experiments/results/` |
-| `scripts/` | Check scripts and the audit fixture reference calculation (`scripts/contracts/`) |
+| `scripts/` | Check, cluster, image-scan and smoke scripts (`scripts/lib/` holds the owned-child supervisor, the descriptor-owned workdir, the legacy temp-directory helper and the scan evaluator; `scripts/kind_cluster.py` and `scripts/mock_smoke.py` are the foreground Python owners behind the kind and smoke wrappers) and the audit fixture reference calculation (`scripts/contracts/`) |
 
 Directories other than `agents/`, `api/`, `docs/`, `internal/` and `scripts/` are placeholders (`.gitkeep`) at this stage.
 
@@ -52,10 +53,10 @@ Directories other than `agents/`, `api/`, `docs/`, `internal/` and `scripts/` ar
 
 | Command | Effect |
 | --- | --- |
-| `make kind-up` | Creates a local kind cluster named `agentplane` using kind's default topology. Does nothing if it already exists. |
-| `make kind-down` | Deletes only the named cluster, **destroying its workloads**. Does nothing if it does not exist. |
+| `make kind-up` | Creates the named local kind cluster (default `agentplane`): one control plane, one `system` and one `tenant` worker (tenant tainted `NoSchedule`), from `deploy/kind/config.yaml`. An existing cluster is accepted only if its nodes match; it is **never recreated or deleted**. Every operation uses an explicit name and `--context kind-<name>`; your current kubectl context is restored after kind switches it. |
+| `make kind-down` | Deletes exactly the named cluster, **destroying its workloads**. Needs the owner's explicit authorization for that name when an agent runs it. |
 
-Override the name with `KIND_CLUSTER_NAME=<name>`. `kind create cluster` merges into your user kubeconfig (`~/.kube/config`) and switches the current context to `kind-<name>`; nothing is written into this repository. Check `kubectl config current-context` before running other kubectl commands. The labeled multi-node configuration arrives in P0-T5. Per the agent rules, the executor agent must have explicit owner authorization before running `make kind-down`.
+Override the name with `KIND_CLUSTER_NAME=<name>`. kind merges the new context into your user kubeconfig (`~/.kube/config`); nothing is written into this repository. Labels and the taint are placement simulation, **not tenant isolation**. Details, pins and troubleshooting: [`docs/local-development.md`](docs/local-development.md).
 
 ## Quality checks
 
@@ -68,7 +69,13 @@ Override the name with `KIND_CLUSTER_NAME=<name>`. `kind create cluster` merges 
 | `make secrets-history` | Scans every line ever added to `go.sum`. |
 | `make secrets-selftest` | Regression tests for the scanner itself: checksum lines pass, keys in `go.sum` and other files are detected, redaction holds, and scanner errors fail. |
 | `make mock-run` | Runs the deterministic mock chat model on loopback (see [`docs/mockmodel.md`](docs/mockmodel.md)). |
-| `make mock-smoke` | Starts a disposable mock server, checks determinism, streaming, validation and failures, and stops it. Needs go, curl and python3. |
+| `make mock-smoke` | Starts a disposable mock server, checks determinism, streaming, validation and failures, and stops it. Run by the foreground Python runner `scripts/mock_smoke.py` (the wrapper `scripts/mock-smoke.sh` only checks tools and execs it). Needs go and python3. |
+| `make smoke-cleanup-test` | Tests the temporary-directory helper (empty directories only; non-empty ones are retained, replacement decoys survive), guards that no process control or recursive deletion is reachable, and runs the Python suites: the sole-waiter ownership library, the descriptor-owned workdir, the smoke runner and its interrupt/cleanup lifecycles. Needs bash and python3 (3.8 or newer). |
+| `make make-args-test` | Tests that Make variables (cluster name, image, versions, mock flags) reach the scripts as data: quotes, substitutions and shell metacharacters in a value execute nothing, and invalid values are refused before any tool runs. Stub tools only. |
+| `make kind-config-test` | Tests the kind topology, node-shape checks and cluster targeting with stub tools (no Docker, no cluster). Needs go and python3. |
+| `make mock-image` | Builds the nonroot local image `agentplane/mockmodel:p0` (needs Docker; pushes nothing). |
+| `make mock-image-scan` | Scans it with the pinned Trivy; fails on fixable HIGH/CRITICAL findings and on any scan failure, prints everything else. Needs network for the database. |
+| `make image-scan-test` | Tests the scan gate with fixture reports and stub tools (no Docker, no network). |
 | `make contracts-check` | Validates the gateway and audit contract fixtures: OpenAPI and JSON Schema validation of positive and negative fixtures, independent recomputation of hashes and signatures, and the audit verification rules. Needs go and python3. |
 
 The Go module exists (since P0-T3), so the Go targets run for real and propagate failures. Go source without a root `go.mod` is an error, and a repository without Go source and without `go.mod` would report `NOT APPLICABLE` and succeed. The checks live in `scripts/check-go.sh` and `scripts/scan-secrets.sh`. **`go.sum` and gitleaks:** gitleaks' built-in configuration allowlists any path named `go.sum` for every rule, so path-aware scans (`gitleaks dir`, `gitleaks git`) never look inside it. The scripts therefore scan the root `go.sum` through stdin and drop only lines with the exact structure `module v<version>[/go.mod] h1:<43 base64 characters>=` (public checksums that trip the generic-api-key rule on module names containing "api"). Any other line in `go.sum`, a `go.sum` in a subdirectory, and every other rule are scanned in full. A secret that is itself shaped like a checksum line cannot be told apart by content; that residual risk is accepted.
@@ -77,14 +84,15 @@ Hooks: `pre-commit install --hook-type pre-commit --hook-type pre-push`, then `p
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main` with read-only permissions, job timeouts, commit-pinned actions and pinned tool versions (pre-commit 4.7.0, gitleaks 8.30.1, golangci-lint 2.15.0; Go module dependencies pinned in `go.mod` and `go.sum`). Four jobs:
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main` with read-only permissions, job timeouts, commit-pinned actions and pinned tool versions (pre-commit 4.7.0, gitleaks 8.30.1, golangci-lint 2.15.0; Go module dependencies pinned in `go.mod` and `go.sum`). Five jobs:
 
 - `lint`: `pre-commit validate-config`, then `pre-commit run --all-files` (YAML and private-key checks, `actionlint` workflow syntax validation at v1.7.12, `make fmt-check`, `make lint`).
-- `unit-test`: `make test` (`go test -race ./...`, including the contract and mock model tests) and `make mock-smoke`.
+- `unit-test`: `make test` (`go test -race ./...`, including the contract, mock model and kind-topology tests), `make smoke-cleanup-test`, `make make-args-test`, `make kind-config-test` and `make mock-smoke`.
 - `contracts`: `make contracts-check`.
+- `image`: `make image-scan-test`, `make mock-image`, container start and hardened-run checks, a checksum-verified install of Trivy 0.76.2, and `make mock-image-scan`. Nothing is pushed.
 - `gitleaks`: `gitleaks git --redact --no-banner --log-opts="--all" .` over full history, `make secrets`, `make secrets-history` (go.sum history) and `make secrets-selftest`.
 
-The workflow installs the Go toolchain declared in `go.mod` and golangci-lint and runs the real checks. CI cannot show controller or gateway correctness yet (none exists), and Trivy image scanning is deferred until images exist.
+The workflow installs the Go toolchain declared in `go.mod` and golangci-lint and runs the real checks. CI cannot show controller or gateway correctness yet (none exists), and it creates no kind cluster. Only the mock image is scanned; later images need their own scans.
 
 ## Contributing workflow
 
