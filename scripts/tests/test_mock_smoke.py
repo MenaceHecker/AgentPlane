@@ -8,6 +8,7 @@ surprise, and every owned server REAPED.
 
 Run:  python3 -I -B -m unittest discover -s scripts/tests -p 'test_mock_smoke.py' -v
 """
+import errno
 import os
 import re
 import sys
@@ -162,12 +163,12 @@ class InProcessTests(SmokeCase):
             def spawn(self, argv, log_fd, env):
                 SecondSpawnFails.n += 1
                 if SecondSpawnFails.n == 2:
-                    raise OSError(11, "injected: cannot fork the second server")
+                    raise OSError(errno.ENOMEM, "injected: cannot fork the second server")
                 return super().spawn(argv, log_fd, env)
 
         rc, out, smoke = self.run_main(adapter=SecondSpawnFails)
         self.assertEqual(rc, 1, out)
-        self.assertIn("unexpected OSError", out)
+        self.assertRegex(out, r"unexpected \w*Error: .*cannot fork the second server")
         self.assertEqual([c.name for c in smoke.owner.children], ["main"], "only the first server was ever spawned")
         self.assertEqual(smoke.owner.children[0].state, op.State.REAPED)
         self.assertEqual(smoke.owner.children[0].exit_code, 0)
