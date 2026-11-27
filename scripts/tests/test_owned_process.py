@@ -397,24 +397,137 @@ class FakeAdapterTests(OwnerTestCase):
         owner.close()
         self.assertEqual(owner.log_tail(child), "(log closed)")
 
-    def test_a_registration_failure_after_the_fork_does_not_leak_the_child(self):
+    def test_a_reservation_failure_before_the_fork_spawns_nothing_and_leaves_no_record(self):
         owner = self.make()
         real = op.OwnedChild.__init__
 
         def broken(*a, **k):
-            raise MemoryError("injected: cannot build the handle")
+            raise MemoryError("injected: cannot reserve the ownership record")
         op.OwnedChild.__init__ = broken
         try:
             with self.assertRaises(MemoryError):
                 owner.spawn(["x"], self.log_path("a"))
         finally:
             op.OwnedChild.__init__ = real
-        pid = self.pid_of(0)
-        self.assertEqual([k[2] for k in self.adapter.kills()], [signal.SIGKILL], "the unregistered child must be killed")
-        self.assertEqual(self.adapter.kills()[0][1], pid)
-        self.assertTrue(self.adapter.procs[pid]["collected"], "and collected by this owner")
+        self.assertEqual([e for e in self.adapter.log if e[0] == "spawn"], [], "nothing may be forked when the record cannot be reserved")
         self.assertEqual(owner.children, ())
+
+    def post_fork_failure(self, owner, **setup):
+        """Make the step after the fork (attaching the pid to the reserved record) fail."""
+        def broken(self, child, pid):
+            raise MemoryError("injected: cannot attach the pid")
+        real = op.Owner._adopt
+        op.Owner._adopt = broken
+        try:
+            with self.assertRaises(MemoryError):
+                owner.spawn(["x"], self.log_path("a"))
+        finally:
+            op.Owner._adopt = real
+
+    def test_a_failure_after_the_fork_is_recovered_through_the_normal_paths_and_stays_visible(self):
+        owner = self.make()
+        self.post_fork_failure(owner)
+        pid = self.pid_of(0)
+        self.assertEqual(len(owner.children), 1, "the reserved record must stay visible")
+        child = owner.children[0]
+        self.assertEqual(child.state, op.State.REAPED)
+        self.assertEqual(child.exit_code, -signal.SIGKILL)
+        log = [e for e in self.adapter.log if e[0] in ("wait", "kill")]
+        k = next(i for i, e in enumerate(log) if e[0] == "kill")
+        self.assertEqual(log[k - 1], ("wait", pid), "the emergency KILL must be preceded by a poll of the same child")
+        self.assertEqual([e[2] for e in log if e[0] == "kill"], [signal.SIGKILL])
+        report = owner.report()
+        self.assertFalse(report.ok, "a recovered-by-kill child is not a clean run")
+        self.assertIn("exited with status -9", report.failures[0])
         self.assertEqual(set(signal.pthread_sigmask(signal.SIG_BLOCK, [])) & set(op.INTERRUPT_SIGNALS), set(), "the mask was not restored")
+
+    def test_a_failure_after_the_fork_that_exited_already_is_collected_not_signalled(self):
+        owner = self.make()
+        self.adapter.exit_after_next_wait.clear()
+        real_spawn = self.adapter.spawn
+
+        def spawn_then_exit(argv, log_fd, env):
+            pid = real_spawn(argv, log_fd, env)
+            self.adapter.exit_child(pid, 0)
+            return pid
+        self.adapter.spawn = spawn_then_exit
+        self.post_fork_failure(owner)
+        self.assertEqual(self.adapter.kills(), [], "an exited child is collected, never signalled")
+        self.assertEqual(owner.children[0].state, op.State.REAPED)
+
+    def test_a_failed_emergency_kill_leaves_a_lost_record_that_fails_the_report(self):
+        owner = self.make()
+        self.adapter.kill_error[5001] = PermissionError(errno.EPERM, "Operation not permitted")
+        self.post_fork_failure(owner)
+        child = owner.children[0]
+        self.assertEqual(child.state, op.State.LOST)
+        self.assertIn("kill failed", child.lost_reason)
+        report = owner.report()
+        self.assertFalse(report.ok)
+        self.assertIn("lost ownership", report.failures[0])
+        self.assertFalse(all(c.state == op.State.REAPED for c in owner.children), "a workdir gate on REAPED must see this child")
+
+    def test_an_echild_during_emergency_recovery_is_lost_and_never_signalled(self):
+        owner = self.make()
+        self.adapter.wait_error[5001] = ChildProcessError(errno.ECHILD, "No child processes")
+        self.post_fork_failure(owner)
+        self.assertEqual(owner.children[0].state, op.State.LOST)
+        self.assertEqual(self.adapter.kills(), [])
+
+    def test_an_uncollectible_child_in_emergency_recovery_is_lost_after_the_bounded_wait(self):
+        owner = self.make()
+        self.adapter.unkillable.add(5001)
+        start = self.clock.t
+        self.post_fork_failure(owner)
+        self.assertLessEqual(self.clock.t - start, 5.0 + op.POLL_STEP_SECONDS)
+        child = owner.children[0]
+        self.assertEqual(child.state, op.State.LOST)
+        self.assertIn("emergency cleanup incomplete", child.lost_reason)
+        self.assertEqual([k[2] for k in self.adapter.kills()], [signal.SIGKILL], "a lost record is not signalled again")
+
+    def test_completed_children_do_not_shorten_a_fresh_cohorts_grace_in_a_default_shutdown(self):
+        owner = self.make()
+        a = owner.spawn(["a"], self.log_path("a"))
+        owner.shutdown(1.0, 1.0)                              # a is stopped and reaped; its deadlines are spent
+        self.assertEqual(a.state, op.State.REAPED)
+        self.clock.sleep(10.0)
+        b = owner.spawn(["b"], self.log_path("b"))
+        self.adapter.term_behaviour[self.pid_of(1)] = "ignore"
+        start = self.clock.t
+        owner.shutdown(2.0, 2.0)                              # DEFAULT targets: every child, including the finished a
+        kill_at = next(e for e in self.adapter.log if e[0] == "kill" and e[3] == 2 and e[2] == signal.SIGKILL)
+        self.assertGreaterEqual(self.clock.t - start, 2.0, "the fresh child must get its full graceful interval")
+        self.assertEqual([k[2] for k in self.adapter.kills() if k[3] == 2], [signal.SIGTERM, signal.SIGKILL])
+        self.assertIsNotNone(kill_at)
+
+    def test_a_pending_old_child_keeps_its_earlier_deadline_and_a_fresh_child_keeps_its_own(self):
+        owner = self.make()
+        a = owner.spawn(["a"], self.log_path("a"))
+        self.adapter.term_behaviour[self.pid_of(0)] = "ignore"
+        owner.request_stop(a)
+        t0 = self.clock.t
+        owner.shutdown(1.0, 5.0, children=[a, ])              # fixes a's graceful deadline at t0+1 and kills it
+        self.assertTrue(a.escalated)
+        b = owner.spawn(["b"], self.log_path("b"))
+        self.adapter.term_behaviour[self.pid_of(1)] = "ignore"
+        c = owner.spawn(["c"], self.log_path("c"))
+        self.adapter.term_behaviour[self.pid_of(2)] = "ignore"
+        owner.request_stop(c)
+        owner.shutdown(3.0, 1.0, children=[c])                # c's deadline is fixed at +3
+        start = self.clock.t
+        owner.shutdown(4.0, 1.0)                              # default: a terminal, c terminal, b fresh -> +4 for b only
+        self.assertGreaterEqual(self.clock.t - start, 4.0, "b must not be shortened by a or c")
+        self.assertEqual(t0, 0.0)
+
+    def test_invalid_shutdown_seconds_are_refused_before_any_signal(self):
+        owner = self.make()
+        owner.spawn(["a"], self.log_path("a"))
+        for bad in (float("nan"), float("inf"), float("-inf"), -1, "2", None, True):
+            with self.assertRaises(op.OwnershipError, msg=repr(bad)):
+                owner.shutdown(bad, 1.0)
+            with self.assertRaises(op.OwnershipError, msg=repr(bad)):
+                owner.shutdown(1.0, bad)
+        self.assertEqual(self.adapter.kills(), [])
 
     def test_a_failing_spawn_closes_the_log_descriptor_and_registers_nothing(self):
         owner = self.make()

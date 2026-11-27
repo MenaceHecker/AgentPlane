@@ -62,6 +62,7 @@ class OwnershipError(Exception):
 
 
 class State:
+    NEW = "NEW"            # reserved before the fork; becomes OWNED when the pid is attached
     OWNED = "OWNED"
     TERM_SENT = "TERM_SENT"
     KILL_SENT = "KILL_SENT"
@@ -98,7 +99,7 @@ class OwnedChild:
         self.log_path = log_path
         self._owner = owner
         self._pid = pid
-        self._state = State.OWNED
+        self._state = State.OWNED if pid is not None else State.NEW
         self._exit_code = None
         self._signal_number = None
         self._escalated = False
@@ -192,6 +193,7 @@ class Owner:
         self._children = {}          # id(handle) -> handle, for handles this owner created
         self._order = []             # creation order, for reports
         self._interrupt = None
+        self._emergency_seconds = 5.0
         self._saved_handlers = {}
         # A parent that ignores SIGCHLD makes the kernel collect children automatically, so the
         # owner's waitpid would fail with ECHILD. Establish the default disposition explicitly.
@@ -257,51 +259,76 @@ class Owner:
     def spawn(self, argv, log_path=None, name=None, env=None, log_fd=None):
         """Start argv (a list, no shell) and return its handle. stdout and stderr go to a regular log
         that this owner keeps open for bounded diagnostic reads: either log_path (created here,
-        exclusively) or log_fd (a caller's O_RDWR|O_APPEND regular file, duplicated)."""
+        exclusively) or log_fd (a caller's O_RDWR|O_APPEND regular file, duplicated).
+
+        The ownership record is RESERVED before the fork, so a failure after the fork cannot make a
+        live child invisible: the record then carries the recovery result (REAPED, or LOST with the
+        reason) into every report, and the workdir decisions that read it."""
         if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(a, str) for a in argv):
             raise OwnershipError("argv must be a non-empty list or tuple of strings (a string would be split into characters)")
         fd = self._log_descriptor(log_path, log_fd)
         old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, INTERRUPT_SIGNALS)
-        pid = None
+        child = None
         try:
             try:
-                pid = self._adapter.spawn(list(argv), fd, dict(os.environ) if env is None else env)
-            except BaseException:
-                os.close(fd)                     # the adapter contract: if it raises there is no child
-                raise
-            # Registration comes FIRST after the fork and is the only step that can fail here. No
-            # interrupt can be acted on in between: they are blocked.
-            try:
-                child = OwnedChild(_CREATE_TOKEN, self, name or argv[0], argv, log_path or "<fd>", pid)
+                child = OwnedChild(_CREATE_TOKEN, self, name or argv[0], argv, log_path or "<fd>", None)
                 child._log_fd = fd
                 self._children[id(child)] = child
                 self._order.append(child)
             except BaseException:
-                self._emergency_reap(pid)        # a child exists that no handle describes: do not leak it
-                os.close(fd)
+                self._forget(child, fd)
+                raise
+            try:
+                pid = self._adapter.spawn(list(argv), fd, dict(os.environ) if env is None else env)
+            except BaseException:
+                self._forget(child, fd)          # the adapter contract: if it raises there is no child
+                raise
+            try:
+                self._adopt(child, pid)
+            except BaseException:
+                self._emergency_reap(child, pid)  # the record stays visible with the recovery outcome
                 raise
         finally:
             signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
         return child
 
-    def _emergency_reap(self, pid, seconds=5.0):
-        """Last resort for a child that was forked but could not be registered. Safe because this
-        process is its parent and has not collected it, so the number cannot belong to anyone else.
-        Bounded; failures are swallowed so the original exception is the one reported (a child that
-        cannot be collected may be orphaned: the documented limit for interpreter-level failures)."""
-        end = self._clock() + seconds
+    def _forget(self, child, fd):
+        """Undo a reservation when no child was ever created."""
+        if child is not None:
+            self._children.pop(id(child), None)
+            if child in self._order:
+                self._order.remove(child)
+            child._log_fd = None
         try:
-            self._adapter.kill(pid, signal.SIGKILL)
-        except BaseException:
-            return
-        while self._clock() < end:
-            try:
-                got, _ = self._adapter.waitpid_nohang(pid)
-            except BaseException:
-                return
-            if got:
-                return
-            self._sleep(POLL_STEP_SECONDS)
+            os.close(fd)
+        except OSError:
+            pass
+
+    def _adopt(self, child, pid):
+        child._pid = pid
+        child._state = State.OWNED
+
+    def _emergency_reap(self, child, pid):
+        """Recovery for a child that was forked but could not be attached to its record. Safe because
+        this process is its parent and has not collected it. It uses the NORMAL paths: poll first
+        (REAPED is marked before anything else, ECHILD means LOST), then KILL through the same
+        poll-before-signal step, then a bounded poll. If the child is not collected in time, or a wait
+        or kill fails, the record becomes LOST with the reason, so reports fail and cleanup of anything
+        the child might still use is withheld. No PID, ps or process-group fallback."""
+        try:
+            child._pid = pid
+            child._state = State.OWNED
+            end = self._clock() + self._emergency_seconds
+            self.poll(child)
+            if not child.done:
+                self._signal(child, signal.SIGKILL, State.KILL_SENT)
+            while not child.done and self._clock() < end:
+                self._sleep(POLL_STEP_SECONDS)
+                self.poll(child)
+            if not child.done:
+                self._lose(child, "emergency cleanup incomplete: the child was not collected within %.1f s" % self._emergency_seconds)
+        except BaseException as exc:
+            self._lose(child, "emergency cleanup failed (%s: %s)" % (type(exc).__name__, exc))
 
     def close(self):
         """Close every retained log descriptor. Call after the last diagnostic read."""
@@ -323,6 +350,8 @@ class Owner:
         self._check(child)
         if child._state in (State.REAPED, State.LOST):
             return child._exit_code
+        if child._pid is None:
+            return None
         try:
             got, status = self._adapter.waitpid_nohang(child._pid)
         except ChildProcessError as exc:
@@ -387,47 +416,49 @@ class Owner:
         return True
 
     # ---- bounded shutdown ---------------------------------------------------------------
-    def _wait(self, pending, deadline):
-        while True:
-            for child in pending:
-                self.poll(child)
-            pending[:] = [c for c in pending if not c.done]
-            if not pending:
-                return
-            remaining = deadline - self._clock()
-            if remaining <= 0:
-                return
-            self._sleep(min(POLL_STEP_SECONDS, remaining))
+    @staticmethod
+    def _seconds(value, name):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")) or value < 0:
+            raise OwnershipError("%s must be a finite number >= 0 (got %r)" % (name, value))
+        return float(value)
 
     def shutdown(self, term_seconds=DEFAULT_TERM_SECONDS, kill_seconds=DEFAULT_KILL_SECONDS, children=None):
-        """TERM to every still-owned target, a shared graceful interval, then KILL to those still owned,
-        a shared reap interval. Deadlines are absolute and belong to the targets: the first shutdown
-        that includes a child fixes its deadlines, so calling again (even from an interrupted cleanup)
-        resets nothing, while an independent batch of other children gets its own."""
+        """TERM to every still-owned target, then KILL to each one that is still uncollected once ITS graceful
+        deadline has passed, and give it ITS reap interval. Deadlines are absolute and belong to the
+        child: the first shutdown that includes a live child fixes its deadlines, so repeating the call
+        (even from an interrupted cleanup) resets nothing, a child that is already terminal contributes
+        nothing, and a fresh child is never shortened by an older cohort's spent deadline. Children
+        started together in one call share the same graceful and reap deadlines."""
+        term_seconds = self._seconds(term_seconds, "term_seconds")
+        kill_seconds = self._seconds(kill_seconds, "kill_seconds")
         targets = list(self._order) if children is None else list(children)
         for child in targets:
             self._check(child)
-        existing = [c._term_dl for c in targets if c._term_dl is not None]
-        term_dl = min(existing) if existing else self._clock() + term_seconds
-        for child in targets:
+        live = [c for c in targets if not c.done]
+        now = self._clock()
+        for child in live:
             if child._term_dl is None:
-                child._term_dl = term_dl
-        pending = [c for c in targets if not c.done]
-        for child in pending:
+                child._term_dl = now + term_seconds
+        for child in live:
             self.request_stop(child)
-        pending = [c for c in pending if not c.done]
-        self._wait(pending, term_dl)
-        if pending:
-            existing = [c._kill_dl for c in pending if c._kill_dl is not None]
-            kill_dl = min(existing) if existing else self._clock() + kill_seconds
+        pending = [c for c in live if not c.done]
+        while pending:
             for child in pending:
-                if child._kill_dl is None:
-                    child._kill_dl = kill_dl
-            for child in pending:
-                if child._state != State.KILL_SENT and self._signal(child, signal.SIGKILL, State.KILL_SENT):
-                    child._escalated = True
+                self.poll(child)
             pending = [c for c in pending if not c.done]
-            self._wait(pending, kill_dl)
+            now = self._clock()
+            for child in pending:
+                if child._state != State.KILL_SENT and now >= child._term_dl:
+                    if child._kill_dl is None:
+                        child._kill_dl = now + kill_seconds
+                    if self._signal(child, signal.SIGKILL, State.KILL_SENT):
+                        child._escalated = True
+            pending = [c for c in pending if not c.done]
+            waiting = [c for c in pending if c._kill_dl is None or now < c._kill_dl]
+            if not waiting:
+                break                                   # every remaining child's reap deadline has passed
+            nxt = min(c._kill_dl if c._state == State.KILL_SENT else c._term_dl for c in waiting)
+            self._sleep(min(POLL_STEP_SECONDS, max(nxt - now, 0.001)))
         return self.report(targets)
 
     def report(self, children=None):
