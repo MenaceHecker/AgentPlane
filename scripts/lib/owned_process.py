@@ -88,7 +88,7 @@ class OwnedChild:
     used for the kernel calls and is deliberately not exposed."""
 
     __slots__ = ("name", "argv", "log_path", "_owner", "_pid", "_state", "_exit_code",
-                 "_signal_number", "_escalated", "_lost_reason", "_log_fd")
+                 "_signal_number", "_escalated", "_lost_reason", "_log_fd", "_term_dl", "_kill_dl")
 
     def __init__(self, token, owner, name, argv, log_path, pid):
         if token is not _CREATE_TOKEN:
@@ -104,6 +104,8 @@ class OwnedChild:
         self._escalated = False
         self._lost_reason = None
         self._log_fd = None
+        self._term_dl = None      # this child's absolute graceful deadline, fixed by the first shutdown that includes it
+        self._kill_dl = None
 
     state = property(lambda self: self._state)
     exit_code = property(lambda self: self._exit_code)
@@ -189,9 +191,6 @@ class Owner:
         self._sleep = sleep
         self._children = {}          # id(handle) -> handle, for handles this owner created
         self._order = []             # creation order, for reports
-        self._term_deadline = None
-        self._kill_deadline = None
-        self._kill_seconds = DEFAULT_KILL_SECONDS
         self._interrupt = None
         self._saved_handlers = {}
         # A parent that ignores SIGCHLD makes the kernel collect children automatically, so the
@@ -381,28 +380,34 @@ class Owner:
             self._sleep(min(POLL_STEP_SECONDS, remaining))
 
     def shutdown(self, term_seconds=DEFAULT_TERM_SECONDS, kill_seconds=DEFAULT_KILL_SECONDS, children=None):
-        """TERM to every still-owned child, a shared graceful interval, then KILL to those still
-        owned, a shared reap interval. Safe to call again (even from an interrupted cleanup): the
-        deadlines are fixed by the first call."""
-        if self._term_deadline is None:
-            self._term_deadline = self._clock() + term_seconds
-            self._kill_seconds = kill_seconds
+        """TERM to every still-owned target, a shared graceful interval, then KILL to those still owned,
+        a shared reap interval. Deadlines are absolute and belong to the targets: the first shutdown
+        that includes a child fixes its deadlines, so calling again (even from an interrupted cleanup)
+        resets nothing, while an independent batch of other children gets its own."""
         targets = list(self._order) if children is None else list(children)
         for child in targets:
             self._check(child)
+        existing = [c._term_dl for c in targets if c._term_dl is not None]
+        term_dl = min(existing) if existing else self._clock() + term_seconds
+        for child in targets:
+            if child._term_dl is None:
+                child._term_dl = term_dl
         pending = [c for c in targets if not c.done]
         for child in pending:
             self.request_stop(child)
         pending = [c for c in pending if not c.done]
-        self._wait(pending, self._term_deadline)
+        self._wait(pending, term_dl)
         if pending:
-            if self._kill_deadline is None:
-                self._kill_deadline = self._clock() + self._kill_seconds
+            existing = [c._kill_dl for c in pending if c._kill_dl is not None]
+            kill_dl = min(existing) if existing else self._clock() + kill_seconds
+            for child in pending:
+                if child._kill_dl is None:
+                    child._kill_dl = kill_dl
             for child in pending:
                 if child._state != State.KILL_SENT and self._signal(child, signal.SIGKILL, State.KILL_SENT):
                     child._escalated = True
             pending = [c for c in pending if not c.done]
-            self._wait(pending, self._kill_deadline)
+            self._wait(pending, kill_dl)
         return self.report(targets)
 
     def report(self, children=None):

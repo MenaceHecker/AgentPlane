@@ -472,6 +472,18 @@ class FakeAdapterTests(OwnerTestCase):
         self.assertFalse(report.ok)
         self.assertEqual(len(self.adapter.kills()), 2, "no extra signal on re-entry")
 
+    def test_an_independent_batch_gets_its_own_deadlines_after_an_earlier_shutdown(self):
+        owner = self.make()
+        a = owner.spawn(["a"], self.log_path("a"))
+        self.adapter.term_behaviour[self.pid_of(0)] = "ignore"
+        owner.shutdown(1.0, 1.0, children=[a])                # a is killed; its deadlines are spent
+        b = owner.spawn(["b"], self.log_path("b"))
+        self.adapter.term_behaviour[self.pid_of(1)] = "ignore"
+        start = self.clock.t
+        owner.shutdown(2.0, 2.0, children=[b])
+        self.assertGreaterEqual(self.clock.t - start, 2.0, "b inherited a's spent graceful deadline and was killed early")
+        self.assertEqual([k[2] for k in self.adapter.kills() if k[3] == 2], [signal.SIGTERM, signal.SIGKILL])
+
     # --- signals and spawn ordering ---------------------------------------------------------------
     def test_interrupt_handlers_only_set_a_flag_and_keep_the_first_signal(self):
         owner = self.make()
