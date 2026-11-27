@@ -119,6 +119,11 @@ class SupervisorKilledTests(SmokeCase):
         self.assertNotIn("children:", out, "a killed supervisor cannot report; no self-cleanup is claimed")
         left = self.workdirs_left()
         self.assertEqual(len(left), 1, "the workdir is retained: nothing removes it after a supervisor SIGKILL")
+        # Positively establish that a model SURVIVED the supervisor: it still answers right after the runner was
+        # collected. (A failed connect here would mean nothing survived and the test proves nothing.)
+        with socket.create_connection(("127.0.0.1", port), timeout=2) as probe:
+            probe.sendall(b"GET /readyz HTTP/1.0\r\n\r\n")
+            self.assertIn(b"200", probe.recv(64), "the orphaned server did not answer after the supervisor was killed")
         # The orphaned fake server is NOT signalled by rediscovered PID; its watchdog (FAKE_EXIT_AFTER=6) ends it.
         end = time.monotonic() + 20
         while time.monotonic() < end:
