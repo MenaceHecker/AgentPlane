@@ -1,0 +1,55 @@
+......FF....FF...
+======================================================================
+FAIL: test_an_uncollectible_run_fails_in_bounded_time_without_an_outside_guard (test_repeat_owned_process.RepeatRunnerTests.test_an_uncollectible_run_fails_in_bounded_time_without_an_outside_guard)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<scratch>/wrap-oldcontain/scripts/tests/test_repeat_owned_process.py", line 182, in test_an_uncollectible_run_fails_in_bounded_time_without_an_outside_guard
+    self.assertEqual(len(roots), 1, "the kept working directory must exist, inside the fixture")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : the kept working directory must exist, inside the fixture
+
+======================================================================
+FAIL: test_an_uncollectible_run_fails_in_bounded_time_without_an_outside_guard (test_repeat_owned_process.RepeatRunnerTests.test_an_uncollectible_run_fails_in_bounded_time_without_an_outside_guard)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<scratch>/wrap-oldcontain/scripts/tests/test_repeat_owned_process.py", line 49, in tearDown
+    self.assertEqual(escaped, [], "a repeat runner root escaped the test fixture into the process-wide temp directory")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['repeat-owned-process.qlq20cu4'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'repeat-owned-process.qlq20cu4'
+
+- ['repeat-owned-process.qlq20cu4']
++ [] : a repeat runner root escaped the test fixture into the process-wide temp directory
+
+======================================================================
+FAIL: test_lost_children_are_never_reported_as_reaped (test_repeat_owned_process.RepeatRunnerTests.test_lost_children_are_never_reported_as_reaped)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<scratch>/wrap-oldcontain/scripts/tests/test_repeat_owned_process.py", line 149, in test_lost_children_are_never_reported_as_reaped
+    self.assertEqual(len(self.retained_roots()), 1, "the genuine failure evidence must still be retained, inside the fixture")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : the genuine failure evidence must still be retained, inside the fixture
+
+======================================================================
+FAIL: test_lost_children_are_never_reported_as_reaped (test_repeat_owned_process.RepeatRunnerTests.test_lost_children_are_never_reported_as_reaped)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<scratch>/wrap-oldcontain/scripts/tests/test_repeat_owned_process.py", line 49, in tearDown
+    self.assertEqual(escaped, [], "a repeat runner root escaped the test fixture into the process-wide temp directory")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['repeat-owned-process.n2dn1uc_'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'repeat-owned-process.n2dn1uc_'
+
+- ['repeat-owned-process.n2dn1uc_']
++ [] : a repeat runner root escaped the test fixture into the process-wide temp directory
+
+----------------------------------------------------------------------
+Ran 15 tests in 23.063s
+
+FAILED (failures=4)
