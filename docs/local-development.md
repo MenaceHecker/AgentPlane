@@ -27,7 +27,7 @@ CI**, and creating one on Linux or on amd64 hardware has not been tested.
 | Tool | Pin | Install |
 | --- | --- | --- |
 | Git, GNU Make, curl, python3 (3.8 or newer, standard library only) | any recent | OS package manager |
-| `ps` with `-o ppid`, `-o stat` and `-o lstart` (macOS, or procps on Linux) | any recent | OS; not busybox. The smoke harness uses it to confirm a process is still its own child before signalling it; if `ps` is unusable it fails closed and signals nothing |
+| A POSIX host (macOS or Linux) | any recent | The smoke runner and the kind script are Python programs that start and collect their own child processes directly. They do not use `ps`, the shell job table, a PID file or a process-group signal ([ADR-007](adr/ADR-007-owned-process-supervision.md)), so there is no process-listing prerequisite |
 | Go | the `go` directive in `go.mod` (1.27.3) | https://go.dev/dl |
 | Docker (Desktop or Engine) | running daemon; cgroup v2 | https://docs.docker.com/get-docker |
 | kind | **v0.31.0 exactly** (the script refuses any other) | `brew install kind` or the release binary, see [`deploy/kind/README.md`](../deploy/kind/README.md) |
@@ -145,7 +145,7 @@ rescan and record the digests in the run report.
 | `refusing to recreate '<name>' because its state could not be read` | The cluster exists but kubectl cannot read it (Docker paused, cluster stopped). Fix that first; nothing was changed. |
 | kubectl talks to the wrong cluster | Always pass `--context kind-<name>`; check `kubectl config current-context`. |
 | `could not restore your kubectl current context` | kubectl refused `use-context` or `unset`. Run the command the message prints, then check `kubectl config current-context`. The cluster itself was created or checked. |
-| `cannot establish its state ... not signalling and not waiting` (smoke harness) | `ps` or the shell job table gave no usable answer, so the harness refused to signal or wait on that process. Check that `ps -o ppid=,stat=,lstart= -p $$` works; the named process may still be running and can be stopped by hand. |
+| `some child is lost, uncollected or unregistered, so the ... workdir <path> was kept for inspection` (smoke or kind), or `it could not be collected, so cleanup is incomplete` | The runner is the only process that collects its own children. It could not confirm that a child was collected, so it signalled nothing further and kept its private directory (it never deletes it recursively). A model server it started may still be running: look for it yourself (for example with your own `ps`), stop it by hand, inspect the kept directory, then delete the directory yourself. Nothing signals a PID found in a log. |
 | `Trivy 0.76.2 is required` or `SCAN_TRIVY_VERSION is not set` | Install the pinned Trivy and run through `make mock-image-scan`. |
 | scan: `NOT a pass` / `INVALID REPORT` | The database could not be downloaded or the report is unusable. Check network access to `mirror.gcr.io`/`ghcr.io` and rerun; a failed scan is never reported as clean. |
 | scan: `GATE FAILED` | A HIGH or CRITICAL finding has a fix. Update the base image or Go version and rebuild. |
@@ -157,7 +157,24 @@ rescan and record the digests in the run report.
 - Local only; one tested host (macOS arm64). No Linux or amd64 cluster claim.
 - Labels and the taint are placement simulation, not isolation (no NetworkPolicy
   enforcement, no Pod Security, no policy engine yet).
-- Process identity is best effort, not unique: the smoke harness checks that a PID is still its own child (parent, start time as `ps` prints it to the second, and the shell job table) at every poll and immediately before each signal, and signals nothing if that cannot be established. It cannot tell a registered child from a new child of the same shell that received the same PID within the same second (reproduced in review r2), and there is an unquantified gap between the last check and the kill system call. The exposure is a sibling child of the same shell, not an arbitrary process. Closing it needs a design decision recorded as Blocked in `agents/runs/P0-T5.md`.
+- Process supervision covers only the **direct children** that the smoke runner
+  or the kind script starts, as described in
+  [ADR-007](adr/ADR-007-owned-process-supervision.md). Each runner is the only
+  waiter and signaller for those children, and it never signals a child it has
+  already collected or lost. The limits: if the runner itself is killed (SIGKILL,
+  a crash, host failure or permanent suspension), nothing cleans up after it and
+  its model servers may keep running until they are stopped by hand; a child that
+  is still uncollectible after SIGKILL fails the run and is reported as incomplete
+  cleanup; grandchildren, daemonizing processes, hostile same-user code and the Go
+  build tool's own descendants are not covered; and the bounded deadlines apply to
+  responsive userspace operations, not to a stalled kernel.
+- The private temporary directories are removed by file descriptor, with a
+  nonrecursive `rmdir`, and only when exactly the expected files are present. Any
+  surprise keeps the directory and fails the run. A hostile same-user rename
+  between the final check and the `rmdir` is outside the supported threat model.
+- The kind and smoke behavior described here was verified with stub tools and a
+  local mock model; the live kind lifecycle is recorded separately and is not part
+  of CI.
 - Scan results are a point-in-time record against the database downloaded at
   scan time and say nothing about future findings or about unscanned images.
 - The kind binary from Homebrew is not byte-identical to the upstream release

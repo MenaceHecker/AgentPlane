@@ -1,0 +1,49 @@
+PASS  go test ./internal/kindshape: committed topology, node-shape cases and config-shape cases
+PASS  kindshape accepts the committed config
+PASS  kindshape refuses empty input (status 2), never treating it as compatible
+PASS  kindshape refuses a document that is not a node list (status 2)
+PASS  kindshape reports an empty node list as incompatible (status 1), never compatible
+PASS  kindshape accepts the committed real kubectl get nodes -o json fixture (kind List)
+PASS  up creates the named cluster from the labeled config and restores the prior kubectl context (kind switched it)
+PASS  every kubectl operation named --context kind-agentplane-t; none used the current or the unrelated context
+PASS  an existing compatible cluster is accepted with no create, no delete and the context untouched
+PASS  the idempotent run also used only explicit --context targeting
+PASS  incompatible existing cluster (single): refused, nothing created or deleted, recovery needs owner-approved deletion
+PASS  incompatible existing cluster (notaint): refused, nothing created or deleted, recovery needs owner-approved deletion
+PASS  incompatible existing cluster (oldver): refused, nothing created or deleted, recovery needs owner-approved deletion
+PASS  an unreadable existing cluster is never recreated
+PASS  'kind get clusters' failing creates nothing
+PASS  an unsupported kind version is refused before any cluster is listed or created
+PASS  an unreachable Docker daemon is refused with no kind call
+PASS  a config whose node image is not digest-pinned is refused before creating anything
+PASS  with no prior kubectl context, none is left set after creation
+PASS  an existing cluster missing from kubeconfig is exported, the prior context restored, nothing recreated
+PASS  a failed use-context after create fails the run (rc=1) and reports the actual current context; no preservation is claimed
+PASS  a failed use-context after export fails the run and reports the actual current context
+PASS  a use-context that claims success but changes nothing is caught by verifying the result
+PASS  a failed unset of the current context (none before) fails the run and reports what remains
+PASS  on success the verified current context is reported
+PASS  an earlier failure (incompatible cluster) is preserved and the restore failure is reported as well
+PASS  when nothing changed the context, a failing use-context is never needed or called
+PASS  down of the cluster that was the current context leaves none, verified, with nothing to restore to
+PASS  down restores the prior context if kind switched it
+PASS  down fails and reports the actual context if the switched context cannot be restored
+PASS  every failing context read (at capture, at restore, at read-back and at the final report) in six scenarios is a nonzero exit, never a (verified) claim, and a failed first read changes nothing
+PASS  the script reads the current context only with config view (exit status separates absence from failure), never with config current-context
+PASS  probe A: an unreadable initial context aborts before any mutation and the existing context is not unset
+PASS  probe B: after create switched an empty context, unreadable follow-up reads fail the run and the real remaining context is not claimed restored
+PASS  a failing contexts listing is not treated as a missing context: no export, the run fails
+PASS  a positively established absence of a current context is still handled and verified
+PASS  real kubectl: an unset, empty or missing kubeconfig reads as exit 0 with no output, a corrupt one as a nonzero exit (the contract the stub models)
+PASS  kind-cluster.sh: a TMPDIR symlink retargeted mid-run removes the script's own directory (in A) through its held descriptors and leaves the same-named decoy in B untouched (exit 0)
+PASS  a successful up exits 0 with the context verified and the private temp directory gone
+PASS  a successful down exits 0 and leaves nothing
+PASS  an idempotent up on a compatible cluster exits 0 and leaves nothing
+PASS  a failed operation keeps its status 1 and message and the owned directory is still removed
+PASS  a workdir replaced mid-run fails the run, keeps the original (renamed) and never touches the replacement's decoy
+PASS  invalid cluster names (empty, uppercase, ';', leading/trailing '-', space, command substitution, '/') are refused before any tool runs
+PASS  down deletes exactly the named cluster; unrelated clusters and the prior context are unchanged
+PASS  down on a missing cluster deletes nothing
+PASS  down deletes nothing when the cluster list cannot be read
+PASS  test_kind_cluster.py passes (Ran 27 tests in 26.343s)
+kind-config self-test: all passed

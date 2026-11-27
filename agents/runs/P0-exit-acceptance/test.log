@@ -1,0 +1,6 @@
+ok  	github.com/MenaceHecker/AgentPlane/api/v1alpha1	1.284s
+ok  	github.com/MenaceHecker/AgentPlane/cmd/kindshape	1.651s
+ok  	github.com/MenaceHecker/AgentPlane/cmd/mockmodel	3.829s
+ok  	github.com/MenaceHecker/AgentPlane/internal/contractcheck	2.264s
+ok  	github.com/MenaceHecker/AgentPlane/internal/kindshape	2.378s
+ok  	github.com/MenaceHecker/AgentPlane/mockmodel	4.641s

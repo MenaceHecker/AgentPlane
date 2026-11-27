@@ -1,0 +1,11 @@
+mock-smoke: handlers installed
+mock-smoke: building
+mock-smoke: main ready on 127.0.0.1:55071
+mock-smoke: two identical requests gave byte-identical responses (361 bytes)
+mock-smoke: stream ok (19 events, usage {"prompt_tokens": 4, "completion_tokens": 16, "total_tokens": 20}, finish stop)
+mock-smoke: invalid request rejected with 400
+mock-smoke: failing ready on 127.0.0.1:55078
+mock-smoke: --error-rate=1 fails deterministically with 500
+mock-smoke: children: build=REAPED(0), main=REAPED(0), failing=REAPED(0)
+mock-smoke: both servers exited 0 on SIGTERM and every owned child was reaped
+mock-smoke: OK

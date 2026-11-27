@@ -1,0 +1,6 @@
+git version 2.50.1 (Apple Git-155)
+GNU Make 3.81
+go version go1.27.3 darwin/arm64
+Python 3.14.7
+golangci-lint has version 2.15.0 built with go1.27.2 from 25c5369 on 2026-10-16T10:51:54Z
+(eval):1: command not found: gitleaks
