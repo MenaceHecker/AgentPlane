@@ -463,6 +463,49 @@ class OwnershipTests(KindCase):
         self.assertIn("was kept for inspection", out)
         self.assertEqual(len(self.root_entries()), 1, "a lost child keeps the workdir")
 
+    def fd_count(self):
+        return len(os.listdir("/dev/fd"))
+
+    def run_failing_setup(self, patch_name, patch):
+        """Run the owner in process with one workdir step made to fail; return fd counts around 3 repeats."""
+        if not os.path.isdir("/dev/fd"):
+            self.skipTest("no /dev/fd")
+        import owned_workdir as ow
+        real = getattr(ow.Workdir, patch_name)
+        counts = []
+        try:
+            setattr(ow.Workdir, patch_name, patch(real))
+            rc, out = self.run_in_process(op.PosixAdapter, "up", "agentplane-t")           # warm-up
+            counts.append(self.fd_count())
+            for _ in range(3):
+                self.reset(PRIOR)
+                rc, out = self.run_in_process(op.PosixAdapter, "up", "agentplane-t")
+                counts.append(self.fd_count())
+        finally:
+            setattr(ow.Workdir, patch_name, real)
+        return rc, out, counts
+
+    def test_a_failing_stderr_capture_create_closes_the_stdout_descriptor_already_acquired(self):
+        def patch(real):
+            def create_file(self_, name):
+                if name.endswith(".err"):
+                    raise OSError(errno.ENOSPC, "injected: cannot create the stderr capture")
+                return real(self_, name)
+            return create_file
+        rc, out, counts = self.run_failing_setup("create_file", patch)
+        self.assertNotEqual(rc, 0, out)
+        self.assertEqual(len(set(counts)), 1, "descriptors leaked across failing runs: %r" % counts)
+
+    def test_a_failing_stdin_open_closes_the_stdout_and_stderr_descriptors_already_acquired(self):
+        def patch(real):
+            def open_read(self_, name):
+                raise OSError(errno.EMFILE, "injected: cannot open the stdin file")
+            return open_read
+        rc, out, counts = self.run_failing_setup("open_read", patch)
+        self.assertNotEqual(rc, 0, out)
+        self.assertEqual(len(set(counts)), 1, "descriptors leaked across failing runs: %r" % counts)
+        self.assertIn("unexpected OSError", out)
+
     def test_closed_output_never_skips_cleanup_and_fails_the_run(self):
         class Broken:
             def write(self, text):

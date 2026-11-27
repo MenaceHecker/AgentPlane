@@ -129,10 +129,13 @@ class Kind:
         they are also echoed, bounded, to the terminal while the command runs."""
         self.counter += 1
         stem = "%02d-%s" % (self.counter, re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-"))
-        out_fd = self.wd.create_file(stem + ".out")
-        err_fd = self.wd.create_file(stem + ".err") if split_stderr else None
-        in_fd = self.wd.open_read(stdin_from) if stdin_from else None
+        out_fd = err_fd = in_fd = None
         try:
+            # The whole acquisition sequence is inside the try: if the second create or the stdin open fails,
+            # every descriptor acquired so far is closed (the workdir's own held descriptors are separate).
+            out_fd = self.wd.create_file(stem + ".out")
+            err_fd = self.wd.create_file(stem + ".err") if split_stderr else None
+            in_fd = self.wd.open_read(stdin_from) if stdin_from else None
             child = self.owner.spawn(argv, log_fd=out_fd, name=label, stdin_fd=in_fd, stderr_fd=err_fd)
         finally:
             for fd in (out_fd, err_fd, in_fd):
