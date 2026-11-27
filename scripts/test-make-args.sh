@@ -14,7 +14,7 @@ ok()  { checks=$((checks + 1)); }
 bad() { checks=$((checks + 1)); failed=$((failed + 1)); echo "FAIL  $1"; }
 
 repo="$fix/repo"; mkdir -p "$repo/scripts/lib" "$fix/bin" "$fix/log"
-cp Makefile "$repo/"; cp scripts/kind-cluster.sh scripts/scan-mock-image.sh "$repo/scripts/"; cp scripts/lib/evaluate_trivy.py scripts/lib/owned-process.sh "$repo/scripts/lib/"
+cp Makefile "$repo/"; cp scripts/kind-cluster.sh scripts/scan-mock-image.sh "$repo/scripts/"; cp scripts/lib/evaluate_trivy.py scripts/lib/owned_process.py scripts/lib/owned_workdir.py "$repo/scripts/lib/"; cp scripts/kind_cluster.py "$repo/scripts/"
 mkdir -p "$repo/deploy/kind" "$repo/mockmodel"; cp deploy/kind/config.yaml "$repo/deploy/kind/"; : >"$repo/mockmodel/Dockerfile"
 for tool in docker kind kubectl trivy go; do
   cat >"$fix/bin/$tool" <<'SH'

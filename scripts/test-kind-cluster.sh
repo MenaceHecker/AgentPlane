@@ -51,6 +51,11 @@ case "$1 $2" in
       mkdir -p "$STUB_RETARGET_TO/$leaf"; echo decoy >"$STUB_RETARGET_TO/$leaf/decoy"
       ln -sfn "$STUB_RETARGET_TO" "$STUB_RETARGET_LINK"
     fi
+    if [ -n "${STUB_REPLACE_WORKDIR_IN:-}" ]; then   # test hook: swap the owner's directory for an unrelated one with a decoy
+      leaf="$(ls "$STUB_REPLACE_WORKDIR_IN" | grep '^kind-cluster\.' | head -1)"
+      mv "$STUB_REPLACE_WORKDIR_IN/$leaf" "$STUB_REPLACE_WORKDIR_IN/$leaf.moved"
+      mkdir "$STUB_REPLACE_WORKDIR_IN/$leaf"; echo decoy >"$STUB_REPLACE_WORKDIR_IN/$leaf/decoy"
+    fi
     [ -n "${STUB_GET_CLUSTERS_FAIL:-}" ] && { echo "failed to list clusters" >&2; exit 1; }
     cat "$ST/clusters" ;;
   "create cluster")
@@ -142,16 +147,12 @@ reset() { # reset PRIOR_CONTEXT CLUSTERS...
   export STUB_NODES="$fix/nodes-good.json"
 }
 run() { # run MODE NAME -> OUT, RC
-  # The script keeps its private temp directory (temporary policy, P0-T5 r3): an operation that succeeded
-  # exits 3 and says so. The legacy assertions below are about the OPERATION, so a "succeeded, directory
-  # retained" run is mapped to RC=0 here and the retention itself is asserted separately (see the end of
-  # this file); a failed operation keeps its own status. Retained directories live in the fixture and are
-  # removed by this test, which created the area.
+  # Each run gets its own TMPDIR inside the fixture. The persistent Python owner must remove its private
+  # directory itself, so a clean root after EVERY run is asserted here, not assumed; no exit-status mapping.
   mkdir -p "$fix/runtmp"
   OUT="$(TMPDIR="$fix/runtmp" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh "$@" 2>&1)"; RC=$?
-  RAW_RC=$RC; RETAINED_DIRS="$(ls "$fix/runtmp" 2>/dev/null | grep -c '^kind-cluster\.')"
-  if [ "$RC" -eq 3 ] && printf '%s' "$OUT" | grep -q 'was NOT removed and is retained'; then RC=0; fi
-  for d in "$fix"/runtmp/kind-cluster.*; do [ -d "$d" ] && rm -rf -- "$d"; done   # the test's own fixture area
+  RETAINED_DIRS="$(ls -A "$fix/runtmp" 2>/dev/null | grep -c '^kind-cluster\.')"
+  if [ "$RETAINED_DIRS" -ne 0 ]; then bad "a run left its private temp directory behind (rc=$RC): $OUT"; for d in "$fix"/runtmp/kind-cluster.*; do [ -d "$d" ] && rm -rf -- "$d"; done; fi   # the test's own fixture area
 }
 count() { grep -c -- "$1" "$ST/log" || true; }   # count log lines matching a fixed string
 cur() { cat "$ST/current"; }
@@ -277,27 +278,32 @@ if command -v kubectl >/dev/null 2>&1; then
 else ok "real-kubectl contract check skipped (kubectl not installed)"; fi
 
 # --- the script's own temp directory: retargeting the TMPDIR symlink mid-run must not redirect anything.
-# Under the temporary retention policy the script's own (non-empty) directory is RETAINED in A, not removed,
-# and the same-named decoy in B must be untouched; the run reports "succeeded, cleanup refused" (3).
+# The owner holds the parent and child descriptors, so removal goes through them: the script's own directory
+# (in A) is removed, the same-named decoy in B is untouched, and the run succeeds.
 rt="$fix/retarget"; mkdir -p "$rt/A" "$rt/B"; ln -s "$rt/A" "$rt/link"
 reset "$PRIOR" agentplane-t
 OUT="$(TMPDIR="$rt/link" STUB_RETARGET_LINK="$rt/link" STUB_RETARGET_FROM="$rt/A" STUB_RETARGET_TO="$rt/B" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh up agentplane-t 2>&1)"; RC=$?
 decoys="$(ls "$rt/B" | grep -c '^kind-cluster\.')"; leftovers="$(ls "$rt/A" | grep -c '^kind-cluster\.')"
-if [ $RC -eq 3 ] && [ "$decoys" -eq 1 ] && [ -f "$rt/B/$(ls "$rt/B" | grep '^kind-cluster\.' | head -1)/decoy" ] && [ "$leftovers" -eq 1 ]; then ok "kind-cluster.sh: a TMPDIR symlink retargeted mid-run leaves the same-named decoy in B untouched and retains the script's own directory in A (exit 3)"; else bad "retargeted TMPDIR (rc=$RC, decoys=$decoys, retained-in-A=$leftovers): $OUT"; fi
+if [ $RC -eq 0 ] && [ "$decoys" -eq 1 ] && [ -f "$rt/B/$(ls "$rt/B" | grep '^kind-cluster\.' | head -1)/decoy" ] && [ "$leftovers" -eq 0 ]; then ok "kind-cluster.sh: a TMPDIR symlink retargeted mid-run removes the script's own directory (in A) through its held descriptors and leaves the same-named decoy in B untouched (exit 0)"; else bad "retargeted TMPDIR (rc=$RC, decoys=$decoys, left-in-A=$leftovers): $OUT"; fi
 
-# --- the retention contract itself (temporary policy, review P0-T5-r3 finding 1)
+# --- successful kind operations return 0 only after owned cleanup (review P0-T5-r4, finding 1)
 reset "$PRIOR" agentplane-t; mkdir -p "$fix/rtn"
 OUT="$(TMPDIR="$fix/rtn" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh up agentplane-t 2>&1)"; RC=$?
-kept="$(ls "$fix/rtn" | grep '^kind-cluster\.' | head -1)"
-mode="$(stat -c '%a' "$fix/rtn/$kept" 2>/dev/null || stat -f '%Lp' "$fix/rtn/$kept" 2>/dev/null)"
-if [ $RC -eq 3 ] && [ -n "$kept" ] && [ "$mode" = 700 ] && printf '%s' "$OUT" | grep -q "retained for inspection: .*/$kept" && [ -n "$(ls -A "$fix/rtn/$kept")" ]; then ok "a successful run exits 3, names the retained private (0700) directory and does not remove it"; else bad "retention contract (rc=$RC kept='$kept' mode=$mode): $OUT"; fi
-if ! printf '%s' "$OUT" | grep -q 'ctx.err'; then ok "the retained directory's contents are not printed"; else bad "the retained directory's contents were printed"; fi
-rm -rf -- "${fix:?}/rtn"   # the test's own fixture area
-# a FAILED operation keeps its own status and message and still reports the retention
-reset "$PRIOR" agentplane-t; mkdir -p "$fix/rtn"; export STUB_GET_CLUSTERS_FAIL=1
+if [ $RC -eq 0 ] && [ -z "$(ls -A "$fix/rtn")" ] && printf '%s' "$OUT" | grep -q "your kubectl current context is '$PRIOR' (verified)"; then ok "a successful up exits 0 with the context verified and the private temp directory gone"; else bad "successful up (rc=$RC, root: $(ls -A "$fix/rtn" | tr '\n' ' ')): $OUT"; fi
+reset "$PRIOR" agentplane-t agentplane-x; OUT="$(TMPDIR="$fix/rtn" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh down agentplane-x 2>&1)"; RC=$?
+if [ $RC -eq 0 ] && [ -z "$(ls -A "$fix/rtn")" ]; then ok "a successful down exits 0 and leaves nothing"; else bad "successful down (rc=$RC): $OUT"; fi
+reset "$PRIOR" agentplane-t; OUT="$(TMPDIR="$fix/rtn" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh up agentplane-t 2>&1)"; RC=$?
+if [ $RC -eq 0 ] && [ -z "$(ls -A "$fix/rtn")" ] && printf '%s' "$OUT" | grep -q 'already exists and matches'; then ok "an idempotent up on a compatible cluster exits 0 and leaves nothing"; else bad "idempotent up (rc=$RC): $OUT"; fi
+# a FAILED operation keeps its own status and message and leaves nothing behind
+reset "$PRIOR" agentplane-t; export STUB_GET_CLUSTERS_FAIL=1
 OUT="$(TMPDIR="$fix/rtn" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh down agentplane-t 2>&1)"; RC=$?
 unset STUB_GET_CLUSTERS_FAIL
-if [ $RC -eq 1 ] && printf '%s' "$OUT" | grep -q "'kind get clusters' failed" && printf '%s' "$OUT" | grep -q 'was NOT removed and is retained'; then ok "an earlier failure keeps its status 1 and message; the refused cleanup is reported as well, never turned into success"; else bad "failure plus retention (rc=$RC): $OUT"; fi
+if [ $RC -eq 1 ] && printf '%s' "$OUT" | grep -q "'kind get clusters' failed" && [ -z "$(ls -A "$fix/rtn")" ]; then ok "a failed operation keeps its status 1 and message and the owned directory is still removed"; else bad "failed operation (rc=$RC): $OUT"; fi
+# the owned directory is REPLACED mid-run by an unrelated directory with a decoy: cleanup must refuse, retain the original, never touch the decoy
+reset "$PRIOR" agentplane-t; rm -rf -- "${fix:?}/rtn"; mkdir -p "$fix/rtn"
+OUT="$(TMPDIR="$fix/rtn" STUB_REPLACE_WORKDIR_IN="$fix/rtn" PATH="$fix/bin:$PATH" KINDSHAPE_BIN="$fix/kindshape" scripts/kind-cluster.sh up agentplane-t 2>&1)"; RC=$?
+leaf="$(ls "$fix/rtn" | grep '^kind-cluster\.' | grep -v moved | head -1)"
+if [ $RC -ne 0 ] && [ -f "$fix/rtn/$leaf/decoy" ] && [ -n "$(ls -d "$fix"/rtn/kind-cluster.*.moved 2>/dev/null)" ] && printf '%s' "$OUT" | grep -q 'replaced'; then ok "a workdir replaced mid-run fails the run, keeps the original (renamed) and never touches the replacement's decoy"; else bad "replaced workdir (rc=$RC leaf=$leaf): $OUT"; fi
 rm -rf -- "${fix:?}/rtn"
 
 names_ok=1
