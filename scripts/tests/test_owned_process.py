@@ -484,6 +484,28 @@ class FakeAdapterTests(OwnerTestCase):
         self.assertGreaterEqual(self.clock.t - start, 2.0, "b inherited a's spent graceful deadline and was killed early")
         self.assertEqual([k[2] for k in self.adapter.kills() if k[3] == 2], [signal.SIGTERM, signal.SIGKILL])
 
+    def test_interrupt_delivers_only_catchable_signals_to_a_live_owned_child(self):
+        owner = self.make()
+        a = owner.spawn(["a"], self.log_path("a"))
+        pid = self.pid_of(0)
+        self.adapter.term_behaviour[pid] = "ignore"
+        for bad in (signal.SIGKILL, signal.SIGUSR1, 0, 9):
+            with self.assertRaises(op.OwnershipError):
+                owner.interrupt(a, bad)
+        self.assertEqual(self.adapter.kills(), [])
+        self.assertTrue(owner.interrupt(a, signal.SIGINT))
+        self.assertTrue(owner.interrupt(a, signal.SIGHUP))
+        self.assertEqual([k[2] for k in self.adapter.kills()], [signal.SIGINT, signal.SIGHUP])
+        self.assertEqual(a.state, op.State.OWNED, "a delivered interrupt must not advance the state machine")
+        self.assertEqual(self.adapter.log[-2], ("wait", pid), "the poll must come right before the signal")
+        with self.assertRaises(op.OwnershipError):
+            owner.interrupt(object(), signal.SIGINT)
+        self.adapter.exit_child(pid, 0)
+        self.assertFalse(owner.interrupt(a, signal.SIGTERM), "an exited child is collected, not signalled")
+        self.assertEqual(a.state, op.State.REAPED)
+        self.assertEqual(len(self.adapter.kills()), 2)
+        self.assertFalse(owner.interrupt(a, signal.SIGTERM), "no signal after REAPED")
+
     # --- signals and spawn ordering ---------------------------------------------------------------
     def test_interrupt_handlers_only_set_a_flag_and_keep_the_first_signal(self):
         owner = self.make()

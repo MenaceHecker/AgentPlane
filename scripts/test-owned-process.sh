@@ -158,5 +158,6 @@ py_suite() { # py_suite FILE
 py_suite test_owned_process.py
 py_suite test_owned_workdir.py
 py_suite test_mock_smoke.py
+py_suite test_owned_process_integration.py
 
 if [ "$failed" -eq 0 ]; then echo "owned-process self-test: all passed"; else echo "owned-process self-test: $failed FAILED"; exit 1; fi

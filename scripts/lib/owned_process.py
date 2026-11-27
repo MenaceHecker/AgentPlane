@@ -366,6 +366,26 @@ class Owner:
             return False
         return self._signal(child, signal.SIGTERM, State.TERM_SENT)
 
+    def interrupt(self, child, signum):
+        """Deliver a catchable INT, TERM or HUP to one still-owned child, for tests of a child that handles
+        interrupts. Same ownership rules as request_stop (exact handle, poll right before, never after
+        REAPED or LOST); the child stays OWNED, so a later shutdown still runs the full TERM/KILL sequence.
+        Any other signal is refused: KILL goes only through the shutdown escalation."""
+        self._check(child)
+        if signum not in INTERRUPT_SIGNALS:
+            raise OwnershipError("only INT, TERM and HUP can be delivered this way")
+        if child._state not in _LIVE:
+            return False
+        self.poll(child)
+        if child._state not in _LIVE:
+            return False
+        try:
+            self._adapter.kill(child._pid, signum)
+        except (ProcessLookupError, OSError) as exc:
+            self._lose(child, "kill failed (%s)" % exc)
+            return False
+        return True
+
     # ---- bounded shutdown ---------------------------------------------------------------
     def _wait(self, pending, deadline):
         while True:
