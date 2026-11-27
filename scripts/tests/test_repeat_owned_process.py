@@ -143,6 +143,76 @@ class RepeatRunnerTests(unittest.TestCase):
         self.assertNotIn("collected: yes", text)
         self.assertNotIn("OK\n", text.replace("PASS", ""))
 
+    def in_process(self, adapter, *args):
+        sys.path.insert(0, HERE)
+        import repeat_owned_process as rop
+        real, out = op.PosixAdapter, io.StringIO()
+        op.PosixAdapter = adapter
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = rop.main(list(args))
+        finally:
+            op.PosixAdapter = real
+        return rc, out.getvalue()
+
+    def test_an_uncollectible_run_fails_in_bounded_time_without_an_outside_guard(self):
+        kills = []
+
+        class Uncollectible:
+            def spawn(self, argv, log_fd, env):
+                return 8001
+            def waitpid_nohang(self, pid):
+                return (False, 0)                      # never collectible
+            def kill(self, pid, sig):
+                kills.append(sig)
+        start = time.monotonic()
+        rc, out = self.in_process(Uncollectible, "--runs", "3", "--timeout", "0.2", "--term-seconds", "0.1", "--kill-seconds", "0.1", "--", "x")
+        self.assertLess(time.monotonic() - start, 10.0, "the runner did not stop by itself")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("could not be collected within its reap deadline", out)
+        self.assertIn("0 reaped, 0 lost, 1 uncollected", out)
+        self.assertEqual(kills, [signal.SIGTERM, signal.SIGKILL], "exactly one bounded escalation; no retries, no resets")
+        self.assertIn("working directory kept for inspection", out)
+        self.assertNotIn("run  2", out, "scheduling must stop after the uncollectible run")
+
+    def test_descriptors_are_released_on_failing_in_process_runs(self):
+        if not os.path.isdir("/dev/fd"):
+            self.skipTest("no /dev/fd")
+
+        class Lost:
+            n = 0
+            def spawn(self, argv, log_fd, env):
+                Lost.n += 1
+                return 9000 + Lost.n
+            def waitpid_nohang(self, pid):
+                raise ChildProcessError(errno.ECHILD, "No child processes")
+            def kill(self, pid, sig):
+                raise AssertionError("a lost child must never be signalled")
+        import tempfile
+        saved = tempfile.tempdir
+        tempfile.tempdir = self.dir
+        try:
+            self.in_process(Lost, "--runs", "1", "--timeout", "0.1", "--term-seconds", "0.05", "--kill-seconds", "0.05", "--", "x")
+            before = len(os.listdir("/dev/fd"))
+            for _ in range(5):
+                self.in_process(Lost, "--runs", "1", "--timeout", "0.1", "--term-seconds", "0.05", "--kill-seconds", "0.05", "--", "x")
+            self.assertEqual(len(os.listdir("/dev/fd")), before, "retained log descriptors leaked across failing runs")
+        finally:
+            tempfile.tempdir = saved
+
+    def test_nonfinite_or_nonpositive_deadlines_are_refused(self):
+        for flag, bad in (("--timeout", "nan"), ("--timeout", "inf"), ("--timeout", "0"), ("--timeout", "-1"),
+                          ("--term-seconds", "nan"), ("--term-seconds", "-1"), ("--kill-seconds", "inf")):
+            child, out = self.run_runner(flag, bad, "--runs", "1", *self.cmd("pass"))
+            self.assertEqual(child.exit_code, 2, "%s %s: %s" % (flag, bad, out))
+            self.assertIn("finite number", out)
+
+    def test_test_counts_are_summed_across_every_suite_a_wrapper_runs(self):
+        sys.path.insert(0, HERE)
+        import repeat_owned_process as rop
+        self.assertEqual(rop.tests_ran("Ran 40 tests in 1s\nOK\nRan 22 tests in 0.1s\nRan 1 test in 0s\n"), 63)
+        self.assertIsNone(rop.tests_ran("no summary"))
+
     def test_an_interrupt_stops_the_runs_collects_every_child_and_exits_143(self):
         log = os.path.join(self.dir, "interrupted.log")
         child = self.owner.spawn([sys.executable, "-I", "-B", RUNNER, "--runs", "2", "--"] + [sys.executable, "-I", "-c", "import time; time.sleep(60)"],

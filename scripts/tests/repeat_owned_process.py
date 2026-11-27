@@ -54,15 +54,27 @@ class Run:
         self.timed_out = False
 
 
+def finite(minimum, inclusive):
+    def parse(text):
+        try:
+            value = float(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError("%r is not a number" % text)
+        if value != value or value in (float("inf"), float("-inf")) or value < minimum or (value == minimum and not inclusive):
+            raise argparse.ArgumentTypeError("%r must be a finite number %s %g" % (text, ">=" if inclusive else ">", minimum))
+        return value
+    return parse
+
+
 def parse_args(argv):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--runs", type=int, default=10)
     p.add_argument("--load-runs", type=int, default=0, help="how many of the runs (the last ones) execute under load")
     p.add_argument("--workers", type=int, default=4, help="busy-loop workers alive during loaded runs")
     p.add_argument("--parallel", type=int, default=1, help="how many runs may execute at the same time")
-    p.add_argument("--timeout", type=float, default=300.0, help="seconds a run may take before it is stopped")
-    p.add_argument("--term-seconds", type=float, default=op.DEFAULT_TERM_SECONDS)
-    p.add_argument("--kill-seconds", type=float, default=op.DEFAULT_KILL_SECONDS)
+    p.add_argument("--timeout", type=finite(0, False), default=300.0, help="seconds a run may take before it is stopped")
+    p.add_argument("--term-seconds", type=finite(0, True), default=op.DEFAULT_TERM_SECONDS)
+    p.add_argument("--kill-seconds", type=finite(0, True), default=op.DEFAULT_KILL_SECONDS)
     p.add_argument("command", nargs="*", help="command to run, after --; default: the ownership-library tests")
     args = p.parse_args(argv)
     if args.runs < 1 or args.parallel < 1 or args.workers < 0 or not 0 <= args.load_runs <= args.runs:
@@ -73,8 +85,9 @@ def parse_args(argv):
 
 
 def tests_ran(text):
-    m = re.search(r"^Ran (\d+) tests?", text, re.M)
-    return int(m.group(1)) if m else None
+    """Sum every unittest "Ran N tests" summary (a wrapper such as make may run several suites)."""
+    counts = [int(n) for n in re.findall(r"^Ran (\d+) tests?", text, re.M)]
+    return sum(counts) if counts else None
 
 
 def main(argv=None):
@@ -88,10 +101,12 @@ def main(argv=None):
     print("repeat: working directory %s" % base)
     first_load = args.runs - args.load_runs + 1
     pending = list(range(1, args.runs + 1))
-    active, finished, problems, workers = [], [], [], []
+    active, finished, problems, workers, stuck = [], [], [], [], []
     created_files = []
     try:
         while (pending or active) and owner.interrupted is None:
+            if stuck:
+                break
             idle_left = any(n < first_load for n in pending) or any(not r.loaded for r in active)
             # Loaded runs: only after the whole idle cohort is finished, and only once every worker is ready.
             if args.load_runs and not idle_left and not workers:
@@ -133,6 +148,15 @@ def main(argv=None):
                     run.timed_out = True
                     problems.append("run %d exceeded %.0f s; stopping it (TERM, then KILL if ignored)" % (run.number, args.timeout))
                     owner.shutdown(args.term_seconds, args.kill_seconds, children=[run.child])
+                    if not run.child.done:
+                        # One bounded TERM/KILL/reap attempt was made and its deadlines are spent. Do not
+                        # retry, do not reset them, do not signal anything else: stop scheduling and fail,
+                        # keeping the evidence (the child may still be running; the summary counts it).
+                        active.remove(run)
+                        stuck.append(run)
+                        problems.append("run %d could not be collected within its reap deadline (state %s); cleanup is incomplete and the process may still be running" % (run.number, run.child.state))
+                        pending.clear()
+                        continue
                 if not run.child.done:
                     continue
                 run.elapsed = time.monotonic() - run.started
@@ -158,8 +182,11 @@ def main(argv=None):
     finally:
         if owner.interrupted is not None:
             problems.append("interrupted by signal %d" % owner.interrupted)
-        report = owner.shutdown(args.term_seconds, args.kill_seconds)   # workers and any unfinished run, bounded
-        owner.restore_signal_handlers()
+        try:
+            report = owner.shutdown(args.term_seconds, args.kill_seconds)   # workers and any unfinished run, bounded
+        finally:
+            owner.restore_signal_handlers()
+            owner.close()          # descriptors are released on EVERY outcome; the log FILES stay as evidence
     if workers:
         print("repeat: busy workers stopped")
     already = {r.child.name for r in finished}
