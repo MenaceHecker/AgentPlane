@@ -323,19 +323,40 @@ class Owner:
                 pid = self._adapter.spawn(list(argv), fd, dict(os.environ) if env is None else env, **extra)
             except BaseException:
                 self._forget(child, fd, err_fd)  # the adapter contract: if it raises there is no child
+                self._release_stdin(in_fd)
                 raise
-            finally:
-                if in_fd is not None:
-                    os.close(in_fd)              # the child has its own copy; the parent never needs it
-            child._err_fd = err_fd
+            # The child exists. FIRST attach its pid to the reserved record, then do every other parent-side
+            # step; any failure from here on goes through the bounded recovery, which polls, kills and
+            # collects THIS child through the normal paths and leaves the record (and the retained
+            # descriptors) visible, so a failing close can never strand a child that cannot be signalled.
             try:
                 self._adopt(child, pid)
+                child._err_fd = err_fd
+                closing, in_fd = in_fd, None
+                if closing is not None:
+                    self._close_stdin(closing)   # the child has its own copy; the parent never needs it
             except BaseException:
-                self._emergency_reap(child, pid)  # the record stays visible with the recovery outcome
+                self._emergency_reap(child, pid)
+                if err_fd is not None and child._err_fd is None:
+                    child._err_fd = err_fd       # keep the capture attached even if adoption itself failed
                 raise
+            finally:
+                self._release_stdin(in_fd)       # only still set if adoption failed before the close was tried
         finally:
             signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
         return child
+
+    def _close_stdin(self, fd):
+        os.close(fd)
+
+    @staticmethod
+    def _release_stdin(fd):
+        """Best-effort close of the parent's stdin duplicate on an error path."""
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     def _forget(self, child, fd, err_fd=None):
         """Undo a reservation when no child was ever created."""

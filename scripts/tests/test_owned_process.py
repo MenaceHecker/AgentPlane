@@ -714,6 +714,81 @@ class FakeAdapterTests(OwnerTestCase):
         owner.close()
         self.assertEqual((owner.log_tail(child), owner.log_tail(child, stream="stderr")), ("(log closed)", "(log closed)"))
 
+    def stdin_close_failure(self, owner, with_stderr, then_kill_error=None):
+        """The parent's stdin duplicate fails to close AFTER the fork succeeded (r5 finding 1)."""
+        src = os.path.join(self.dir, "in-%s.txt" % with_stderr)
+        with open(src, "w") as fh:
+            fh.write("x")
+        rfd = os.open(src, os.O_RDONLY)
+        self.addCleanup(os.close, rfd)
+        kw = {}
+        if with_stderr:
+            efd = os.open(os.path.join(self.dir, "err-%s.log" % with_stderr), os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o600)
+            self.addCleanup(os.close, efd)
+            kw["stderr_fd"] = efd
+        real = op.Owner._close_stdin
+
+        def failing(self_, fd):
+            os.close(fd)                                  # the descriptor really goes away, then the call fails
+            raise OSError(errno.EIO, "injected: close failed")
+        op.Owner._close_stdin = failing
+        try:
+            with self.assertRaises(OSError) as ctx:
+                owner.spawn(["x"], self.log_path("a"), stdin_fd=rfd, **kw)
+        finally:
+            op.Owner._close_stdin = real
+        return ctx.exception
+
+    def test_a_stdin_close_failure_after_the_fork_attaches_the_pid_and_recovers_the_child(self):
+        for with_stderr in (False, True):
+            with self.subTest(stderr=with_stderr):
+                self.adapter = FakeAdapter()
+                owner = self.make()
+                err = self.stdin_close_failure(owner, with_stderr)
+                self.assertEqual(err.errno, errno.EIO, "the primary error must be the one that is raised")
+                pid = self.pid_of(0)
+                self.assertEqual(len(owner.children), 1, "the record must stay visible")
+                child = owner.children[0]
+                self.assertNotEqual(child.state, op.State.NEW, "the pid must have been attached before the close")
+                self.assertEqual(child.state, op.State.REAPED)
+                self.assertEqual(child.exit_code, -signal.SIGKILL)
+                log = [e for e in self.adapter.log if e[0] in ("wait", "kill")]
+                k = next(i for i, e in enumerate(log) if e[0] == "kill")
+                self.assertEqual(log[k - 1], ("wait", pid), "the recovery KILL must follow a poll of the same child")
+                self.assertEqual([e[2] for e in log if e[0] == "kill"], [signal.SIGKILL])
+                self.assertEqual(child._err_fd is not None, with_stderr, "the stderr capture must stay attached to the record")
+                self.assertIsNotNone(child._log_fd, "the log capture must stay attached")
+                report = owner.report()
+                self.assertFalse(report.ok)
+                self.assertIn("exited with status -9", report.failures[0])
+                owner.close()
+                self.assertEqual((child._log_fd, child._err_fd), (None, None))
+
+    def test_a_stdin_close_failure_whose_recovery_also_fails_leaves_a_lost_visible_record(self):
+        for with_stderr in (False, True):
+            with self.subTest(stderr=with_stderr):
+                self.adapter = FakeAdapter()
+                owner = self.make()
+                self.adapter.kill_error[5001] = PermissionError(errno.EPERM, "Operation not permitted")
+                self.stdin_close_failure(owner, with_stderr)
+                child = owner.children[0]
+                self.assertEqual(child.state, op.State.LOST)
+                self.assertFalse(owner.report().ok)
+                self.assertFalse(all(c.state == op.State.REAPED for c in owner.children), "a workdir gate on REAPED must see this child")
+
+    def test_a_stdin_close_failure_for_a_child_that_already_exited_collects_it_without_a_signal(self):
+        owner = self.make()
+        real_spawn = self.adapter.spawn
+
+        def spawn_then_exit(argv, log_fd, env, **kw):
+            pid = real_spawn(argv, log_fd, env, **kw)
+            self.adapter.exit_child(pid, 0)
+            return pid
+        self.adapter.spawn = spawn_then_exit
+        self.stdin_close_failure(owner, True)
+        self.assertEqual(self.adapter.kills(), [], "an exited child is collected, never signalled")
+        self.assertEqual(owner.children[0].state, op.State.REAPED)
+
     # --- signals and spawn ordering ---------------------------------------------------------------
     def test_interrupt_handlers_only_set_a_flag_and_keep_the_first_signal(self):
         owner = self.make()
