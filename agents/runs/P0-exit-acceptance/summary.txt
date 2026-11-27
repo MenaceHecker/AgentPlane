@@ -1,0 +1,28 @@
+[fmt-check] cmd='make fmt-check' exit=0 secs=0 lines=       1
+   status after: []
+[lint] cmd='make lint' exit=0 secs=2 lines=       1
+   status after: []
+[test] cmd='make test' exit=0 secs=5 lines=       6
+   status after: []
+[secrets] cmd='make secrets' exit=2 secs=0 lines=       2
+   status after: []
+[secrets-history] cmd='make secrets-history' exit=2 secs=0 lines=       2
+   status after: []
+[secrets-selftest] cmd='make secrets-selftest' exit=2 secs=1 lines=       2
+   status after: []
+[contracts-check] cmd='make contracts-check' exit=0 secs=1 lines=       7
+   status after: []
+[supervisor-test] cmd='make supervisor-test' exit=0 secs=24 lines=     116
+   status after: []
+[smoke-cleanup-test] cmd='make smoke-cleanup-test' exit=0 secs=49 lines=      39
+   status after: []
+[make-args-test] cmd='make make-args-test' exit=0 secs=32 lines=       1
+   status after: []
+[kind-config-test] cmd='make kind-config-test' exit=0 secs=47 lines=      49
+   status after: []
+[image-scan-test] cmd='make image-scan-test' exit=0 secs=3 lines=      55
+   status after: []
+[mock-smoke-1] cmd='make mock-smoke' exit=0 secs=2 lines=      11
+   status after: []
+[mock-smoke-2] cmd='make mock-smoke' exit=0 secs=1 lines=      11
+   status after: []
