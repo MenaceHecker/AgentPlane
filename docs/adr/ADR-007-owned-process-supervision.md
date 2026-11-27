@@ -52,19 +52,22 @@ Why the earlier safeguard failed: a device and inode recorded for a directory do
 
 Decision: the runner owns the workdir through descriptors held for its whole life (the physical parent and the created 0700 child, non-inheritable), never through a recorded number. Only fixed single-component names in a manifest are created or adopted; cleanup first verifies (parent entry names the held child, physical parent unchanged, exactly the manifest names, each the recorded regular file and not a symlink) and then unlinks those files through the child descriptor and removes the empty directory with a nonrecursive rmdir through the parent descriptor. Any mismatch retains everything and fails the run. There is no recursion anywhere. Limit, stated plainly: POSIX has no compare-and-remove by directory descriptor, so a hostile same-user rename between the final check and the rmdir is outside the supported threat model; a non-empty replacement is still protected because rmdir fails on it. The device and inode comparison is kept only as a diagnostic.
 
-Temporary Bash policy: the Bash helper has no persistent descriptor owner, so it removes an **empty** directory only (nonrecursive rmdir) and refuses and retains every non-empty one, with a diagnostic that does not print the contents. Its process API is retired. The one remaining caller, `scripts/kind-cluster.sh`, therefore keeps its private temp directory on every run and exits 3 when the operation itself succeeded (1 for a failed operation). **This does not satisfy kind cleanup acceptance**: restoring automatic cleanup needs a persistent Python owner for that directory's whole lifetime, which is separately planned and not part of this decision.
+Temporary Bash policy (superseded for kind by the persistent owner below): the Bash helper has no persistent descriptor owner, so it removes an **empty** directory only (nonrecursive rmdir) and refuses and retains every non-empty one, with a diagnostic that does not print the contents. Its process API is retired. After this follow-up no script calls it; it is kept, with its tests, only until Codex decides whether to delete it.
+
+Kind follow-up (review P0-T5-r4, "Kind decision and next implementation step"; the owner approved implementing it, including regular-file command IO): `scripts/kind_cluster.py` is one foreground Python owner that holds every tool it starts (through the ownership library, with regular-file stdin, stdout and stderr) and its private workdir (through the held descriptors) for the whole run; `scripts/kind-cluster.sh` is a validating exec wrapper. Success returns 0 only after the operation succeeded, the user's kubectl context was restored and read back, every child was collected and the owned workdir was removed; any failure returns nonzero, a surprising or replaced workdir is retained and never recursively removed, and a lost or force-killed child fails the run. This replaces the temporary exit-3 retention policy; the stub suites no longer map exit 3. It was exercised with stub tools only: no live kind lifecycle was run, so historical live acceptance remains an owner-authorized step.
 
 The word "always" earlier in this ADR (a run that "always stops what it started") applies within the stated limits above: supervisor death, an uncollectible child and hostile same-user action are not covered.
 
 ### Open (not decided here)
-- Automatic cleanup of the kind caller's temp directory (see above).
+- Live kind lifecycle and clean-clone acceptance (stub-verified only; needs explicit owner authorization).
+- Whether to delete the now-unused Bash temp-directory helper and its tests.
 - The Go toolchain and CVE-2026-97054, and the added Go topology checker, are separate and not settled by this ADR.
 
 ## Consequences
 - The reproduced replacement case and the check-then-signal gap disappear for the supervised children: after collection the object is terminal even if a later spawn receives the same number.
 - Observation no longer depends on two non-atomic reads, so the Linux false failures of the Bash helper go away with the helper.
 - Harder: smoke assertions move from Bash and curl to Python's standard library, the Bash process API and its tests are retired (their obligations are mapped to new tests, not dropped), and the harness cannot clean up after its own death.
-- Changed: `kind-cluster.sh` now retains its temp directory and exits 3 on a successful operation (temporary). Unchanged: the product code and every contract.
+- Changed: `kind-cluster.sh` is a wrapper around a persistent Python owner (exit 0 only after verified restoration and owned cleanup). Unchanged: the product code and every contract.
 
 ## Requirement mapping
 | Requirement | How this decision addresses it | Enforced at (phase / component) |

@@ -43,7 +43,7 @@ The `Makefile` fails with an actionable message if gitleaks or golangci-lint is 
 | `deploy/` | `kind/` (local topology config and pins), plus `base/`, `platform/`, `tenants/` manifests |
 | `docs/` | Progress tracker, `adr/` decision records, `gateway/` OpenAPI contract, `audit/` record and checkpoint contracts |
 | `experiments/` | Experiment scripts; raw results go in `experiments/results/` |
-| `scripts/` | Check, cluster, image-scan and smoke scripts (`scripts/lib/` holds the owned-child supervisor, the descriptor-owned workdir, the temp-directory helper and the scan evaluator) and the audit fixture reference calculation (`scripts/contracts/`) |
+| `scripts/` | Check, cluster, image-scan and smoke scripts (`scripts/lib/` holds the owned-child supervisor, the descriptor-owned workdir, the legacy temp-directory helper and the scan evaluator; `scripts/kind_cluster.py` and `scripts/mock_smoke.py` are the foreground Python owners behind the kind and smoke wrappers) and the audit fixture reference calculation (`scripts/contracts/`) |
 
 Directories other than `agents/`, `api/`, `docs/`, `internal/` and `scripts/` are placeholders (`.gitkeep`) at this stage.
 

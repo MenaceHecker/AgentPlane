@@ -321,4 +321,7 @@ if [ $RC -eq 0 ] && [ "$(count 'kind delete')" -eq 0 ] && grep -qx other "$ST/cl
 reset "$PRIOR" agentplane-x; export STUB_GET_CLUSTERS_FAIL=1; run down agentplane-x
 if [ $RC -eq 1 ] && [ "$(count 'kind delete')" -eq 0 ]; then ok "down deletes nothing when the cluster list cannot be read"; else bad "down with list failure (rc=$RC): $OUT"; fi
 
+# --- the persistent owner itself: lifecycle, deadlines, interrupts and workdir refusals, all with stub tools
+if python3 -I -B -m unittest discover -s scripts/tests -p 'test_kind_cluster.py' >"$fix/py-kind.out" 2>&1; then ok "test_kind_cluster.py passes ($(grep -E '^Ran ' "$fix/py-kind.out"))"; else bad "test_kind_cluster.py failed"; tail -40 "$fix/py-kind.out" | sed 's/^/        /'; fi
+
 if [ "$failed" -eq 0 ]; then echo "kind-config self-test: all passed"; else echo "kind-config self-test: $failed FAILED"; exit 1; fi
