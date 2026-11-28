@@ -1,6 +1,6 @@
 # AgentPlane progress
 
-Current phase: Phase 1 — P1-T1 review fixes requested. Owner accepted the Phase 0 exit gate at `f25fc65e17aae84ea1bfd3acfcd9ed088b8cbd58` and approved the P1-T1 plan; P1-T2 onward and Phase 1 completion remain unapproved.
+Current phase: Phase 1 — P1-T1 review r1 finding 1 fixed locally, awaiting re-review. Owner accepted the Phase 0 exit gate at `f25fc65e17aae84ea1bfd3acfcd9ed088b8cbd58` and approved the P1-T1 plan; P1-T2 onward and Phase 1 completion remain unapproved.
 
 Phase plan: [P0 foundations and design](../agents/plans/P0.md), PLANNED. Planning branch: `phase-0/foundations-plan`. Task implementation stays on separate task branches.
 
@@ -16,7 +16,7 @@ DRAFT means planned but awaiting owner approval; PLANNED means the owner approve
 | P0-T3 | `phase-0/api-contracts` | MERGED | [PR #5](https://github.com/MenaceHecker/AgentPlane/pull/5), [PR #6](https://github.com/MenaceHecker/AgentPlane/pull/6) | 2026-11-26 |
 | P0-T4 | `phase-0/mockmodel` | MERGED | [PR #7](https://github.com/MenaceHecker/AgentPlane/pull/7) | 2026-11-26 |
 | P0-T5 | `phase-0/kind` | MERGED | [PR #8](https://github.com/MenaceHecker/AgentPlane/pull/8) | 2026-11-27 |
-| P1-T1 | `phase-1/scaffold` | CHANGES_REQUESTED | [Draft PR #13](https://github.com/MenaceHecker/AgentPlane/pull/13) | 2026-11-27 |
+| P1-T1 | `phase-1/scaffold` | READY_FOR_REVIEW | [Draft PR #13](https://github.com/MenaceHecker/AgentPlane/pull/13) | 2026-11-27 |
 | P1-T2 | `phase-1/tenant-controller` | DRAFT | — | 2026-11-26 |
 | P1-T3 | `phase-1/agent-controller` | DRAFT | — | 2026-11-26 |
 | P1-T4 | `phase-1/validation-webhook` | DRAFT | — | 2026-11-26 |
@@ -76,3 +76,5 @@ The local unstaged root-prompt deletion remains unrelated owner-managed workspac
 
 [P1-T1 plan](../agents/plans/P1-T1.md), [run report](../agents/runs/P1-T1.md): **READY_FOR_REVIEW** (executor results; awaiting Codex review and final-head CI; no self-approval). The owner approved the plan; implementation is four code commits on `phase-1/scaffold` (`a1fc24d`, `b1cda47`, `8329d2e`, `4819f6e`). Tested at `4819f6e82b45d2ed3548cb1869f861a448fe6710` on a clean clone: generated Tenant and Agent CRDs reproduce with controller-gen v0.23.0 and render alone through `kubectl kustomize`; the admission suites pass on disposable envtest API servers for Kubernetes 1.35.0 and 1.37.0 (30 top-level, 88 total tests each, 0 skipped); the manager scaffold starts on loopback, reconciles nothing and stops cleanly; the existing Phase 0 regression batch and all three secret scans pass; existing API Go code differs only in markers and comments. Not claimed: reconciliation, the cross-resource webhook (P1-T4), runtime status or events, quota or registry policy (the schema accepts a negative CPU quantity and an empty `resources`, pinned in tests as deferred), leader election (P1-T7), or any Phase 1 completion. **Open:** Codex review and the owner's merge decision. Final-head CI at `5262570` passed all eight jobs (including the generated-files check and both envtest versions on linux/amd64); two envtest processes left by an earlier test panic were stopped on the owner's instruction (details in the run report). P1-T2 to P1-T7 remain DRAFT and are not started.
 - [Phase 1 draft roadmap](../agents/plans/P1.md): P1-T1 through P1-T7 proposed, execution gated on owner-confirmed Phase 0 exit. Individual approved task plans still required.
+
+**P1-T1 review r1 fix (executor results, awaiting Codex r2):** finding 1 fixed in `9a65805` (signed int32 bounds on `rollout.steps` items and `rollout.slo.p95LatencyMs`, CRD regenerated, Go types unchanged) and `b9bbfbe` (raw-JSON boundary regressions with typed decoding). The new test failed on 1.35.0 against the old CRD (four rejection cases) and passes on 1.35.0 and 1.37.0 (31 top-level, 101 total each, 0 skipped); generation, fmt, lint, unit, contracts, make-args and `go mod verify` pass. Not rerun: the full Phase 0 batch and clean-clone procedure. Not pushed yet; CI on the new head, minors 2 to 4 and the PR description remain open. No merge or other Phase 1 task approved.
