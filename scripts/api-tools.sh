@@ -22,6 +22,22 @@ SETUP_ENVTEST_COMMIT="18149e6fafab1fe3966fd13a65c1d4273558afef"   # sigs.k8s.io/
 SETUP_ENVTEST_MODULE_VERSION="v0.25.3"
 ENVTEST_VERSIONS="1.35.0 1.37.0"
 
+# SHA-512 of the envtest kube-apiserver and etcd binaries, taken from the official
+# kubernetes-sigs/controller-tools releases envtest-v<version> after verifying each archive against
+# its published .sha512 file. setup-envtest also checks the archive hash it downloads, but that hash
+# comes from a moving index, so this pinned table is the check that does not move. A platform that is
+# not listed is reported as BLOCKED rather than run unverified.
+ENVTEST_BINARY_SHA512='
+1.35.0 darwin-arm64 kube-apiserver b06dca735a91499270abb73526cfad83424db0d5452cb4df546a1de32d705f5d129547e5284a85d1f46bb6acbc94bbb358d04761dae8177254f8bb8ef494cdbd
+1.35.0 linux-amd64 kube-apiserver f3bd0ead7ed969d45a7aada4cc8b26d2f74240ec2f05fa49812e1268ea6bdfe7c336bbbf285d5ad9315e260d8c38c7d06ea8ad1ec4ac863f98464fa79dc4e43b
+1.35.0 darwin-arm64 etcd 9a934c1c7f13b73eacf44be45651abf9ef950c354dcfa0e7702d74b9e619b06c831bf0375341a03192852ea7aecae4b6b609348d84c08b949064943e789e25cb
+1.35.0 linux-amd64 etcd 9bac0b51898f24f8bbe58531a87571f235cf9993259ee659ace3f73573d58a0b8390f6adbcdceb8fcffd3729e2f10a5a27056beac40dd976ae3db335afcdbe85
+1.37.0 darwin-arm64 kube-apiserver 65be86efa7ce4a487d2b82d2235c2d56db46724e7fdb17e67d99f4da82d8d388d2919fc04d1e9d0e4069bc243ecb527a2134ef4036ad10f4035f6e36f7e0bfc3
+1.37.0 linux-amd64 kube-apiserver 902e74a15cbf7e1d1927a5b45879b93657db25f6d36b90ed719905648d511cb9c101cefbdc8db07a1b5f0371f42305ef38f28430dbc0b111b52793198edb8d76
+1.37.0 darwin-arm64 etcd b0434b454d98316888ce27283718e97873c3746d40662d0c4932fa641f6a457a3cdc15b768bbcd47d55225db55e6901616707c569814271ce54907f40f9fd4bb
+1.37.0 linux-amd64 etcd 314790095882124ea9687c1a2811e12892d52847ef0310a07a0e244d6c7fa701ea4233eedc2ce90457e39d9538b67f2c24783cbd47c79c739876e6e7d87b4142
+'
+
 export GOTOOLCHAIN=local
 bin="$PWD/bin"
 cache="$bin/envtest-assets"
@@ -87,6 +103,21 @@ cmd_check_generated() {
   echo "check-generated: OK (nothing changed, nothing committed or staged by this check)"
 }
 
+sha512_of() {
+  if command -v sha512sum >/dev/null 2>&1; then sha512sum "$1" | awk '{print $1}'; else shasum -a 512 "$1" | awk '{print $1}'; fi
+}
+
+verify_envtest_assets() {  # verify_envtest_assets <version> <assets dir>
+  local ver="$1" dir="$2" plat bin want got
+  plat="$(go env GOOS)-$(go env GOARCH)"
+  for bin in kube-apiserver etcd; do
+    want="$(printf '%s\n' "$ENVTEST_BINARY_SHA512" | awk -v v="$ver" -v p="$plat" -v b="$bin" '$1 == v && $2 == p && $3 == b {print $4}')"
+    [ -n "$want" ] || die "no pinned SHA-512 for envtest $bin $ver on $plat (BLOCKED, not a pass); add it from the official release."
+    got="$(sha512_of "$dir/$bin")"
+    [ "$got" = "$want" ] || die "envtest $bin $ver on $plat has SHA-512 $got, expected $want; refusing to run it."
+  done
+}
+
 cmd_test_envtest() {
   require_go
   local ver="${ENVTEST_K8S_VERSION:-}"
@@ -109,11 +140,29 @@ cmd_test_envtest() {
     || die "could not obtain the envtest assets for $ver (BLOCKED, not a pass)."
   [ -x "$assets/kube-apiserver" ] && [ -x "$assets/etcd" ] \
     || die "the envtest assets directory '$assets' lacks kube-apiserver or etcd (BLOCKED, not a pass)."
-  echo "test-envtest: Kubernetes $ver assets at $assets"
-  local out status=0
+  verify_envtest_assets "$ver" "$assets"
+  echo "test-envtest: Kubernetes $ver assets at $assets (kube-apiserver and etcd match the pinned official SHA-512)"
+  local out status=0 run_tmp
   out="$(mktemp "${TMPDIR:-/tmp}/envtest-run.XXXXXX")"
-  AGENTPLANE_ENVTEST=1 KUBEBUILDER_ASSETS="$assets" ENVTEST_K8S_VERSION="$ver" \
+  # The control plane's data and certificate directories are created under TMPDIR. A TMPDIR that
+  # belongs to this run alone lets the check below recognize this run's processes by path.
+  run_tmp="$(mktemp -d "${TMPDIR:-/tmp}/envtest-tmp.XXXXXX")"
+  AGENTPLANE_ENVTEST=1 KUBEBUILDER_ASSETS="$assets" ENVTEST_K8S_VERSION="$ver" TMPDIR="$run_tmp" \
     go test -count=1 -v ./internal/apitest/... 2>&1 | tee "$out" || status=$?
+  # Teardown check (read-only): any process still running from this run's private TMPDIR is a
+  # leaked API server or etcd. They are reported with their command lines and NOT signalled: the
+  # script never kills a process by a number it looked up. Stop them yourself after checking.
+  local leftovers
+  leftovers="$(ps -axo pid=,command= | grep -F -- "$run_tmp" | grep -v -F -- 'grep -F' || true)"
+  if [ -n "$leftovers" ]; then
+    echo "ERROR: processes from this run are still running (leaked envtest control plane); NOT stopped by this script:" >&2
+    printf '%s\n' "$leftovers" | cut -c1-200 >&2
+    echo "ERROR: kept $run_tmp for inspection." >&2
+    status=1
+  elif ! rmdir "$run_tmp" 2>/dev/null; then
+    echo "ERROR: the run's private TMPDIR $run_tmp is not empty after the tests; kept for inspection (not deleted)." >&2
+    status=1
+  fi
   # A skipped admission test is not a pass: the target must run every one of them.
   if grep -q -- '--- SKIP' "$out"; then
     echo "ERROR: an envtest test was skipped; that is not a pass." >&2

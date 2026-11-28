@@ -115,6 +115,50 @@ jobs:
       - name: make contracts-check
         run: make contracts-check
 
+  # Generated files must match the committed ones: deepcopy code and CRDs are regenerated with the
+  # pinned controller-gen (installed by go install @version into ./bin) and any difference fails.
+  generated:
+    name: generated
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: make tools
+        run: make tools
+      - name: make check-generated
+        run: make check-generated
+
+  # CRD admission tests on a disposable local kube-apiserver and etcd (envtest), once per pinned
+  # Kubernetes version. No cluster, kubeconfig, cloud or provider is used. The assets come from the
+  # official controller-tools envtest release and are checked against pinned SHA-512 values before
+  # they run (scripts/api-tools.sh).
+  envtest:
+    name: envtest (Kubernetes ${{ matrix.k8s }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s: ["1.35.0", "1.37.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: make tools
+        run: make tools
+      - name: make test-envtest
+        run: make test-envtest ENVTEST_K8S_VERSION=${{ matrix.k8s }}
+
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-latest

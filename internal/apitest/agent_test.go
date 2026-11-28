@@ -51,6 +51,7 @@ func (s *testSuite) namespace(t *testing.T) string {
 }
 
 func TestAgentCRDIsStructuralNamespacedAndEstablished(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	crd, err := s.ext.ApiextensionsV1().CustomResourceDefinitions().Get(context.Background(), "agents.agentplane.io", metav1.GetOptions{})
 	if err != nil {
@@ -96,6 +97,7 @@ func TestAgentCRDIsStructuralNamespacedAndEstablished(t *testing.T) {
 }
 
 func TestAgentValidObjectIsAcceptedAndStoredExactly(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	created := requireCreated(t, s.createAgent(t, "default", validAgent(s.unique("agent-valid"))))
 	for path, want := range map[string]string{
@@ -114,6 +116,7 @@ func TestAgentValidObjectIsAcceptedAndStoredExactly(t *testing.T) {
 }
 
 func TestAgentReplicasAbsentStaysAbsentAndExplicitZeroIsKept(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	created := requireCreated(t, s.createAgent(t, "default", validAgent(s.unique("agent-noreplicas"))))
 	if v, ok := dig(created, "spec", "replicas"); ok {
@@ -140,6 +143,7 @@ func TestAgentReplicasAbsentStaysAbsentAndExplicitZeroIsKept(t *testing.T) {
 }
 
 func TestAgentToolsAndSandboxClassAreOptional(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	created := requireCreated(t, s.createAgent(t, "default", validAgent(s.unique("agent-opt"))))
 	for _, f := range []string{"tools", "sandboxClass", "rollout", "replicas"} {
@@ -160,6 +164,7 @@ func TestAgentToolsAndSandboxClassAreOptional(t *testing.T) {
 }
 
 func TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	for _, path := range [][]string{
 		{"spec"},
@@ -172,6 +177,7 @@ func TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses(t *testing.T) {
 	} {
 		field := strings.Join(path, ".")
 		t.Run("omit "+field, func(t *testing.T) {
+			defer guard(t)
 			obj := without(validAgent(s.unique("agent-missing")), path...)
 			requireRejected(t, s.createAgent(t, "default", obj), field)
 		})
@@ -179,6 +185,7 @@ func TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses(t *testing.T) {
 }
 
 func TestAgentOutOfRangeAndWrongTypedValuesAreRejected(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	big := func(v string) json.Number { return json.Number(v) }
 	cases := []struct {
@@ -209,6 +216,7 @@ func TestAgentOutOfRangeAndWrongTypedValuesAreRejected(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			defer guard(t)
 			obj := with(validAgent(s.unique("agent-bad")), c.value, c.path...)
 			field := c.field
 			if field == "" {
@@ -220,6 +228,7 @@ func TestAgentOutOfRangeAndWrongTypedValuesAreRejected(t *testing.T) {
 }
 
 func TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	rollout := map[string]any{"strategy": "canary", "steps": []any{10, 50, 100}, "slo": map[string]any{"errorRate": "<1%", "p95LatencyMs": 500}}
 	created := requireCreated(t, s.createAgent(t, "default", with(validAgent(s.unique("agent-rollout")), rollout, "spec", "rollout")))
@@ -228,6 +237,7 @@ func TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields(t *testing.T) {
 	}
 	for _, path := range [][]string{{"strategy"}, {"steps"}, {"slo"}, {"slo", "errorRate"}, {"slo", "p95LatencyMs"}} {
 		t.Run("omit rollout."+strings.Join(path, "."), func(t *testing.T) {
+			defer guard(t)
 			r := with(validAgent(s.unique("agent-rollout-missing")), rollout, "spec", "rollout")
 			full := append([]string{"spec", "rollout"}, path...)
 			requireRejected(t, s.createAgent(t, "default", without(r, full...)), strings.Join(full, "."))
@@ -242,12 +252,14 @@ func TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields(t *testing.T) {
 // tests pin that documented boundary so a later policy change is a deliberate one. They are NOT a
 // statement that an empty or negative resource spec is acceptable: that policy is later work.
 func TestAgentResourcePolicyIsDeferredSchemaOnlyChecksTheShape(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	requireCreated(t, s.createAgent(t, "default", with(validAgent(s.unique("agent-emptyres")), map[string]any{}, "spec", "resources")))
 	requireCreated(t, s.createAgent(t, "default", with(validAgent(s.unique("agent-negres")), "-1", "spec", "resources", "requests", "cpu")))
 }
 
 func TestAgentUnknownFieldsArePrunedNotRejected(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	obj := with(validAgent(s.unique("agent-prune")), "x", "spec", "notInTheSchema")
 	created := requireCreated(t, s.createAgent(t, "default", obj))
@@ -257,6 +269,7 @@ func TestAgentUnknownFieldsArePrunedNotRejected(t *testing.T) {
 }
 
 func TestAgentIsNamespacedAndSameNameCanLiveInTwoNamespaces(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	// Not creatable without a namespace.
 	if r := s.postJSON(t, "/apis/agentplane.io/v1alpha1/agents", validAgent(s.unique("agent-nons"))); r.Code == http.StatusCreated {
@@ -278,6 +291,7 @@ func TestAgentIsNamespacedAndSameNameCanLiveInTwoNamespaces(t *testing.T) {
 }
 
 func TestAgentStatusIsWrittenOnlyThroughTheStatusSubresource(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	name := s.unique("agent-status")
 	requireCreated(t, s.createAgent(t, "default", validAgent(name)))
@@ -325,6 +339,7 @@ func TestAgentStatusIsWrittenOnlyThroughTheStatusSubresource(t *testing.T) {
 }
 
 func TestAgentConditionsAreAListMapKeyedByType(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	name := s.unique("agent-cond")
 	requireCreated(t, s.createAgent(t, "default", validAgent(name)))
@@ -345,6 +360,7 @@ func TestAgentConditionsAreAListMapKeyedByType(t *testing.T) {
 }
 
 func TestAgentTableLeavesUnknownReplicasAndReadyBlank(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	name := s.unique("agent-table")
 	requireCreated(t, s.createAgent(t, "default", validAgent(name)))

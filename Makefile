@@ -152,3 +152,7 @@ check-generated: ## Regenerate and fail if api/ or config/crd/ drift from the co
 .PHONY: test-envtest
 test-envtest: ## Run the CRD admission suites on a disposable local API server (ENVTEST_K8S_VERSION=1.35.0 or 1.37.0)
 	@scripts/api-tools.sh test-envtest
+
+.PHONY: build
+build: ## Build the controller manager scaffold into ./bin/manager (builds only; never runs or deploys it)
+	@mkdir -p bin && go build -trimpath -o bin/manager ./cmd/manager

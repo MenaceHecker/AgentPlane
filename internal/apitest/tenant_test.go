@@ -44,6 +44,7 @@ func (s *testSuite) createTenant(t *testing.T, obj map[string]any) response {
 }
 
 func TestTenantCRDIsStructuralClusterScopedAndEstablished(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	crd, err := s.ext.ApiextensionsV1().CustomResourceDefinitions().Get(context.Background(), "tenants.agentplane.io", metav1.GetOptions{})
 	if err != nil {
@@ -89,6 +90,7 @@ func TestTenantCRDIsStructuralClusterScopedAndEstablished(t *testing.T) {
 }
 
 func TestTenantValidObjectIsAcceptedAndStoredExactly(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	name := s.unique("tenant-valid")
 	created := requireCreated(t, s.createTenant(t, validTenant(name)))
@@ -119,6 +121,7 @@ func toString(v any) string {
 }
 
 func TestTenantZeroValuesAreAcceptedAndKeptNotTreatedAsAbsent(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	obj := validTenant(s.unique("tenant-zero"))
 	obj = with(obj, 0, "spec", "budget", "tokensPerDay")
@@ -139,6 +142,7 @@ func TestTenantZeroValuesAreAcceptedAndKeptNotTreatedAsAbsent(t *testing.T) {
 }
 
 func TestTenantEgressAllowedToolsMayBeAbsentOrEmptyAndIsKeptAsGiven(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	absent := without(validTenant(s.unique("tenant-noallow")), "spec", "egress", "allowedTools")
 	created := requireCreated(t, s.createTenant(t, absent))
@@ -154,6 +158,7 @@ func TestTenantEgressAllowedToolsMayBeAbsentOrEmptyAndIsKeptAsGiven(t *testing.T
 }
 
 func TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	for _, path := range [][]string{
 		{"spec"},
@@ -169,6 +174,7 @@ func TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses(t *testing.T) {
 	} {
 		field := strings.Join(path, ".")
 		t.Run("omit "+field, func(t *testing.T) {
+			defer guard(t)
 			obj := without(validTenant(s.unique("tenant-missing")), path...)
 			requireRejected(t, s.createTenant(t, obj), field)
 		})
@@ -176,6 +182,7 @@ func TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses(t *testing.T) {
 }
 
 func TestTenantOutOfRangeAndWrongTypedValuesAreRejected(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	big := func(v string) json.Number { return json.Number(v) }
 	cases := []struct {
@@ -204,6 +211,7 @@ func TestTenantOutOfRangeAndWrongTypedValuesAreRejected(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			defer guard(t)
 			obj := with(validTenant(s.unique("tenant-bad")), c.value, c.path...)
 			field := c.field
 			if field == "" {
@@ -218,12 +226,14 @@ func TestTenantOutOfRangeAndWrongTypedValuesAreRejected(t *testing.T) {
 // that documented boundary so a later policy change is a deliberate one. It is NOT a statement that
 // negative or absurd compute quotas are acceptable: that policy belongs to later validation work.
 func TestTenantQuantityPolicyIsDeferredSchemaOnlyChecksTheShape(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	obj := with(validTenant(s.unique("tenant-qty")), "-4", "spec", "quota", "cpu")
 	requireCreated(t, s.createTenant(t, obj))
 }
 
 func TestTenantUnknownFieldsArePrunedNotRejected(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	obj := with(validTenant(s.unique("tenant-prune")), "x", "spec", "notInTheSchema")
 	obj["extraTopLevel"] = "y"
@@ -237,6 +247,7 @@ func TestTenantUnknownFieldsArePrunedNotRejected(t *testing.T) {
 }
 
 func TestTenantIsClusterScopedNotNamespaced(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	r := s.postJSON(t, tenantsNSPath, validTenant(s.unique("tenant-ns")))
 	if r.Code != http.StatusNotFound {
@@ -259,6 +270,7 @@ func TestTenantIsClusterScopedNotNamespaced(t *testing.T) {
 }
 
 func TestTenantStatusIsWrittenOnlyThroughTheStatusSubresource(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	name := s.unique("tenant-status")
 	requireCreated(t, s.createTenant(t, validTenant(name)))
@@ -310,6 +322,7 @@ func TestTenantStatusIsWrittenOnlyThroughTheStatusSubresource(t *testing.T) {
 }
 
 func TestTenantConditionsAreAListMapKeyedByType(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	name := s.unique("tenant-cond")
 	requireCreated(t, s.createTenant(t, validTenant(name)))
@@ -333,6 +346,7 @@ func TestTenantConditionsAreAListMapKeyedByType(t *testing.T) {
 }
 
 func TestTenantTableShowsDisplayNameAndAnUnknownReadyIsBlankNotSuccess(t *testing.T) {
+	defer guard(t)
 	s := need(t)
 	name := s.unique("tenant-table")
 	requireCreated(t, s.createTenant(t, validTenant(name)))

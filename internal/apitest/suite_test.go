@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -124,6 +125,16 @@ func newSuite(cfg *rest.Config, wantVersion string) (*testSuite, error) {
 		return nil, fmt.Errorf("the API server reports Kubernetes %s but ENVTEST_K8S_VERSION is %s", sv.GitVersion, wantVersion)
 	}
 	return &testSuite{cfg: cfg, http: hc, ext: ext, k8sMinor: minor}, nil
+}
+
+// guard turns a panic in a test into an ordinary failure. A panic in a test goroutine would kill the
+// test binary before TestMain could stop the API server and etcd, leaving both running. Every test
+// and every subtest calls it first: defer guard(t).
+func guard(t *testing.T) {
+	t.Helper()
+	if r := recover(); r != nil {
+		t.Fatalf("panic: %v\n%s", r, debug.Stack())
+	}
 }
 
 // need returns the shared suite or skips the test with an explicit reason.
