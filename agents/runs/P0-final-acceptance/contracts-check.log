@@ -1,0 +1,7 @@
+== 1/3 go mod verify
+all modules verified
+== 2/3 Go contract tests (OpenAPI, JSON Schema, vectors, verification rules)
+ok  	github.com/MenaceHecker/AgentPlane/internal/contractcheck	0.383s
+== 3/3 independent Python reference: regenerate audit fixtures and compare
+reference check: 88 files, 0 problems
+contracts-check: OK

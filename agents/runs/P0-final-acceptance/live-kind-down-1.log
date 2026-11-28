@@ -1,0 +1,3 @@
+Deleting cluster "agentplane-p0-exit" ...
+Deleted nodes: ["agentplane-p0-exit-control-plane" "agentplane-p0-exit-worker" "agentplane-p0-exit-worker2"]
+kind-cluster: your kubectl current context is '<PRIOR_CONTEXT_REDACTED>' (verified).

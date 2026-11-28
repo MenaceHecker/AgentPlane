@@ -1,0 +1,4 @@
+NAME                               STATUS   ROLES           AGE   VERSION   POOL
+agentplane-p0-exit-control-plane   Ready    control-plane   23s   v1.35.0   
+agentplane-p0-exit-worker          Ready    <none>          14s   v1.35.0   system
+agentplane-p0-exit-worker2         Ready    <none>          14s   v1.35.0   tenant

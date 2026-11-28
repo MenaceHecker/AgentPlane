@@ -1,0 +1,18 @@
+# comparisons computed from the unredacted logs (context names are redacted in the committed copies)
+current-context equals initial read (after-up1): YES
+current-context equals initial read (after-up2): YES
+current-context equals initial read (after-load): YES
+current-context equals initial read (after-down1): YES
+current-context equals initial read (after-down2): YES
+initial current-context read exit/empty: non-empty
+node UIDs identical after second kind-up: YES
+kubeconfig context list identical before/after whole lifecycle: YES (2 contexts before, 2 after)
+agentplane-p0-exit absent from initial kind inventory: YES; kind-agentplane-p0-exit context absent initially: YES
+live-tmp entries (find-before-up1): 0
+live-tmp entries (find-after-up1): 0
+live-tmp entries (find-after-up2): 0
+live-tmp entries (find-after-down1): 0
+live-tmp entries (find-after-down2): 0
+kind inventory after down1: No kind clusters found.
+kind inventory after down2: No kind clusters found.
+node-count readiness lines: 3

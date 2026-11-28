@@ -1,0 +1,2 @@
+kind cluster 'agentplane-p0-exit' does not exist; nothing to do.
+kind-cluster: your kubectl current context is '<PRIOR_CONTEXT_REDACTED>' (verified).
