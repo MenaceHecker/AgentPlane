@@ -16,7 +16,7 @@ DRAFT means planned but awaiting owner approval; PLANNED means the owner approve
 | P0-T3 | `phase-0/api-contracts` | MERGED | [PR #5](https://github.com/MenaceHecker/AgentPlane/pull/5), [PR #6](https://github.com/MenaceHecker/AgentPlane/pull/6) | 2026-11-26 |
 | P0-T4 | `phase-0/mockmodel` | MERGED | [PR #7](https://github.com/MenaceHecker/AgentPlane/pull/7) | 2026-11-26 |
 | P0-T5 | `phase-0/kind` | MERGED | [PR #8](https://github.com/MenaceHecker/AgentPlane/pull/8) | 2026-11-27 |
-| P1-T1 | `phase-1/scaffold` | DRAFT | — | 2026-11-26 |
+| P1-T1 | `phase-1/scaffold` | DRAFT | — | 2026-11-27 |
 | P1-T2 | `phase-1/tenant-controller` | DRAFT | — | 2026-11-26 |
 | P1-T3 | `phase-1/agent-controller` | DRAFT | — | 2026-11-26 |
 | P1-T4 | `phase-1/validation-webhook` | DRAFT | — | 2026-11-26 |
@@ -71,4 +71,6 @@ The local unstaged root-prompt deletion remains unrelated owner-managed workspac
 - [x] ADRs and OpenAPI are committed.
 
 ## Next phase planning
+
+[P1-T1 detailed scaffold plan](../agents/plans/P1-T1.md) is DRAFT on `phase-1/scaffold`. The Phase 0 entry gate is now owner-confirmed; execution awaits approval of this individual plan. Planning selects proposed pinned tools, preserves existing API contracts and defines schema/manager/envtest acceptance; no Phase 1 product implementation or live resource change has occurred.
 - [Phase 1 draft roadmap](../agents/plans/P1.md): P1-T1 through P1-T7 proposed, execution gated on owner-confirmed Phase 0 exit. Individual approved task plans still required.
