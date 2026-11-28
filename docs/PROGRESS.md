@@ -1,6 +1,6 @@
 # AgentPlane progress
 
-Current phase: Phase 0 — foundations and design. No phase exit gate verified.
+Current phase: Phase 1 — planning only. Owner accepted the Phase 0 exit gate at `f25fc65e17aae84ea1bfd3acfcd9ed088b8cbd58`; Phase 1 implementation is not authorized.
 
 Phase plan: [P0 foundations and design](../agents/plans/P0.md), PLANNED. Planning branch: `phase-0/foundations-plan`. Task implementation stays on separate task branches.
 
@@ -16,7 +16,7 @@ DRAFT means planned but awaiting owner approval; PLANNED means the owner approve
 | P0-T3 | `phase-0/api-contracts` | MERGED | [PR #5](https://github.com/MenaceHecker/AgentPlane/pull/5), [PR #6](https://github.com/MenaceHecker/AgentPlane/pull/6) | 2026-11-26 |
 | P0-T4 | `phase-0/mockmodel` | MERGED | [PR #7](https://github.com/MenaceHecker/AgentPlane/pull/7) | 2026-11-26 |
 | P0-T5 | `phase-0/kind` | MERGED | [PR #8](https://github.com/MenaceHecker/AgentPlane/pull/8) | 2026-11-27 |
-| P1-T1 | `phase-1/scaffold` | DRAFT | — | 2026-11-26 |
+| P1-T1 | `phase-1/scaffold` | READY_FOR_REVIEW | PR pending | 2026-11-27 |
 | P1-T2 | `phase-1/tenant-controller` | DRAFT | — | 2026-11-26 |
 | P1-T3 | `phase-1/agent-controller` | DRAFT | — | 2026-11-26 |
 | P1-T4 | `phase-1/validation-webhook` | DRAFT | — | 2026-11-26 |
@@ -57,12 +57,20 @@ DRAFT means planned but awaiting owner approval; PLANNED means the owner approve
 - Owner confirmed the root requirements document; P0-T0 corrects the stale AGENTS.md path. Document reviewed; NFR-8/NFR-9 mapped, full compliance remains future work.
 - P0-T0/P0-T1 historical merge/approval reconciliation is recorded in wrap-up review r1; later-task review coverage and the owner phase exit gate remain separate.
 - Owner decisions are ACCEPTED in P0-T2/P0-T3; no decision-approval blocker remains. Signed checkpoints are format-only in Phase 0. Task dependencies and owner phase exit gate remain.
-- Confirm the configured Git email is verified on the owner's GitHub account.
+- Configured Git email verification confirmed by the owner in the Phase 0 exit sign-off below; no account details published.
 
 ## Phase 0 exit gate (owner runs)
-- [ ] `make kind-up` creates the cluster; mock model returns identical output for identical input.
-- [ ] CI is green on `main`.
-- [ ] ADRs and OpenAPI are committed.
+
+**Owner sign-off (this session):** The owner confirmed that the configured Git email is verified on GitHub, accepted the recorded final acceptance evidence and deferrals, and adopted the preceding proposed exit-gate statement and instruction to prepare P1-T1 without implementation: “I confirm the configured Git email email is verified on my Github Account. I accept the recorded final acceptance evidence and deferrals. And whatever else you mention in the prompt above”. This records the owner's decision, not an agent declaring completion.
+
+Accepted main SHA: `f25fc65e17aae84ea1bfd3acfcd9ed088b8cbd58` ([PR #12](https://github.com/MenaceHecker/AgentPlane/pull/12)). [Final acceptance report](../agents/runs/P0-final-acceptance.md), [review APPROVE](../agents/reviews/P0-final-acceptance-r1.md), and [exact-main CI 46089390288](https://github.com/MenaceHecker/AgentPlane/actions/runs/46089390288) support the gate. Relevant source/config matches TESTED_SHA `f6dd6826b814d70d70b40555026bcfc5c2c44be5` (verified by the specified git diff). All five exact-main jobs passed. Accepted limits/deferrals remain: local kind/placement simulation only, no in-cluster serving or network-isolation claim, incomplete long repeats remain incomplete with historical evidence accepted, mutation work deferred without a score, and Bash-helper deletion deferred. Go was patched and scanned; no claim of historical exploitability or universal security.
+
+The local unstaged root-prompt deletion remains unrelated owner-managed workspace state; no deletion intent is inferred or staged. No further live run, cleanup, cloud/provider call, merge or Phase 1 implementation was authorized by recording this sign-off.
+- [x] `make kind-up` creates the cluster; mock model returns identical output for identical input.
+- [x] CI is green on `main`.
+- [x] ADRs and OpenAPI are committed.
 
 ## Next phase planning
+
+[P1-T1 plan](../agents/plans/P1-T1.md), [run report](../agents/runs/P1-T1.md): **READY_FOR_REVIEW** (executor results; awaiting Codex review and final-head CI; no self-approval). The owner approved the plan; implementation is four code commits on `phase-1/scaffold` (`a1fc24d`, `b1cda47`, `8329d2e`, `4819f6e`). Tested at `4819f6e82b45d2ed3548cb1869f861a448fe6710` on a clean clone: generated Tenant and Agent CRDs reproduce with controller-gen v0.23.0 and render alone through `kubectl kustomize`; the admission suites pass on disposable envtest API servers for Kubernetes 1.35.0 and 1.37.0 (30 top-level, 88 total tests each, 0 skipped); the manager scaffold starts on loopback, reconciles nothing and stops cleanly; the existing Phase 0 regression batch and all three secret scans pass; existing API Go code differs only in markers and comments. Not claimed: reconciliation, the cross-resource webhook (P1-T4), runtime status or events, quota or registry policy (the schema accepts a negative CPU quantity and an empty `resources`, pinned in tests as deferred), leader election (P1-T7), or any Phase 1 completion. **Open:** Codex review and the owner's merge decision. Final-head CI at `5262570` passed all eight jobs (including the generated-files check and both envtest versions on linux/amd64); two envtest processes left by an earlier test panic were stopped on the owner's instruction (details in the run report). P1-T2 to P1-T7 remain DRAFT and are not started.
 - [Phase 1 draft roadmap](../agents/plans/P1.md): P1-T1 through P1-T7 proposed, execution gated on owner-confirmed Phase 0 exit. Individual approved task plans still required.

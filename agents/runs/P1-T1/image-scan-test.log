@@ -1,0 +1,55 @@
+PASS  clean report passes
+PASS  a fixable HIGH finding fails the gate
+PASS  a fixable CRITICAL finding fails the gate
+PASS  an unfixed HIGH finding passes but is listed as a limitation
+PASS  an unfixed CRITICAL finding passes but is listed
+PASS  a fixable MEDIUM finding passes and is listed
+PASS  unfixed HIGH plus lower fixable findings pass, all listed
+PASS  an unfixed HIGH does not hide a fixable CRITICAL
+PASS  a report with only an OS target and no findings passes
+PASS  Status fixed with an empty FixedVersion (HIGH) is invalid, not unfixed
+PASS  Status fixed with no FixedVersion (CRITICAL) is invalid, not unfixed
+PASS  Status fixed with no FixedVersion (MEDIUM) is invalid as well
+PASS  Status fixed with a blank FixedVersion is invalid
+PASS  Status fixed with a FixedVersion (HIGH) still fails the gate
+PASS  will_not_fix with a FixedVersion (HIGH) is fixable and fails the gate
+PASS  end_of_life with a FixedVersion (CRITICAL) is fixable and fails the gate
+PASS  will_not_fix without a FixedVersion (HIGH) is unfixed: passes with the limitation
+PASS  a blank FixedVersion with Status affected is treated as fixable (conservative)
+PASS  a non-string Status is invalid
+PASS  an empty file is invalid
+PASS  non-JSON is invalid
+PASS  a JSON array is invalid
+PASS  JSON null is invalid
+PASS  a missing file is invalid
+PASS  a report without Results is invalid (nothing analyzed)
+PASS  a report with empty Results is invalid
+PASS  a report that analyzed no package target is invalid
+PASS  SchemaVersion 1 is invalid
+PASS  a report without Trivy.Version is invalid
+PASS  a report from another Trivy version is invalid
+PASS  a non-image artifact is invalid
+PASS  a report without an image ID is invalid
+PASS  an unknown severity is invalid
+PASS  a vulnerability without an ID is invalid
+PASS  a non-string FixedVersion is invalid
+PASS  a non-list Vulnerabilities is invalid
+PASS  script: a clean scan passes, keeps the JSON evidence, removes the image tar and records the database timestamp
+PASS  script: Trivy runs on the saved tar with every severity and without --ignore-unfixed, --skip-db-update or an ignore file
+PASS  script: a fixable HIGH finding exits 1
+PASS  script: an unfixed HIGH finding exits 0 and prints the limitation
+PASS  script: a database or scanner error (Trivy exit 1) is a failed scan, never a pass
+PASS  script: Trivy exiting 0 with invalid JSON is a failed scan
+PASS  script: Trivy exiting 0 with an empty report is a failed scan
+PASS  script: Trivy exiting 0 without writing a report is a failed scan
+PASS  script: a scan with no vulnerability database recorded is a failed scan
+PASS  script: a report that analyzed nothing is a failed scan
+PASS  script: any Trivy version other than the pin is refused
+PASS  script: an unpinned scan is refused
+PASS  script: a missing image is a failed scan with the build hint
+PASS  script: a failing docker save is a failed scan
+PASS  script: an empty image archive is a failed scan
+PASS  script: an ignore file in the repository is refused (no silent suppression)
+PASS  script: TRIVY_IGNOREFILE, TRIVY_SEVERITY, TRIVY_IGNORE_UNFIXED and TRIVY_SKIP_DB_UPDATE in the environment are refused
+PASS  script: TRIVY_CACHE_DIR (which cannot change findings) is allowed
+image-scan self-test: all passed

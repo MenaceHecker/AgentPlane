@@ -1,0 +1,39 @@
+PASS  the path normaliser collapses repeated slashes, drops trailing ones, keeps spaces and a lone root
+PASS  a directory outside the temp root is refused and left intact
+PASS  a symlink with the right name is refused and its target is intact
+PASS  a relative directory name with no slash is refused and left intact
+PASS  an empty OP_WORKDIR removes nothing
+PASS  refused malformed path '/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T//owned-process-test.wBoEJB/htmp/optest.'
+PASS  refused malformed path '/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T//owned-process-test.wBoEJB/htmp/optest.a/b'
+PASS  refused malformed path '/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T//owned-process-test.wBoEJB/htmp/optest.x/../y'
+PASS  TMPDIR spelling (spaces, no slash): created, then removed, its own directory
+PASS  TMPDIR spelling (spaces, one trailing slash): created, then removed, its own directory
+PASS  TMPDIR spelling (spaces, three trailing slashes): created, then removed, its own directory
+PASS  TMPDIR spelling (internal double slash and trailing slashes): created, then removed, its own directory
+PASS  TMPDIR spelling (internal triple slash): created, then removed, its own directory
+PASS  TMPDIR spelling: a symlink under a spaced, slash-heavy root is still refused and its target is intact
+PASS  TMPDIR spelling: an existing directory whose suffix contains a slash is still refused and intact
+PASS  TMPDIR spelling: an existing directory whose name holds a parent reference is still refused and intact
+PASS  TMPDIR spelling: a path that reaches an existing workdir through a parent reference is refused and intact
+PASS  TMPDIR spelling: a directory with another prefix is still refused
+PASS  ancestor retarget: the workdir is created at the resolved physical path (under A, not under the link)
+PASS  ancestor retarget: the harness's own directory (in A) is the one removed; the same-named decoy in B survives
+PASS  ancestor retarget: a path spelled through the retargeted link, which now reaches the decoy, is refused and nothing is removed
+PASS  ancestor retarget: a root renamed away and replaced by a symlink is refused (no longer resolves to itself)
+PASS  ancestor retarget: a root replaced by a different directory (new inode) is refused; its same-named decoy survives
+PASS  ancestor retarget: a workdir replaced by another directory of the same name is refused; the replacement survives
+PASS  a directory with a matching name that op_mktemp did not create is refused (no recorded identity)
+PASS  a non-empty workdir that passes every identity check is still refused, retained and reported
+PASS  the refusal does not print the directory's contents
+PASS  even with an identity that matches the replacement, the replacement's decoy survives (non-empty is refused)
+PASS  an empty workdir is removed (rmdir)
+PASS  the Bash helper has no process API, no kill/wait, no jobs and no ps
+PASS  no recursive deletion in the helper, kind-cluster.sh or the smoke wrapper
+PASS  scripts/mock-smoke.sh only checks tools and execs the foreground Python runner
+PASS  the smoke runner, kind owner and workdir module have no killpg, bare kill, waitpid(-1) or subprocess
+PASS  no recursive deletion in the Python runners, workdir or supervisor modules
+PASS  test_owned_process.py passes (Ran 58 tests in 1.574s)
+PASS  test_owned_workdir.py passes (Ran 23 tests in 0.093s)
+PASS  test_mock_smoke.py passes (Ran 26 tests in 30.160s)
+PASS  test_owned_process_integration.py passes (Ran 6 tests in 17.324s)
+owned-process self-test: all passed

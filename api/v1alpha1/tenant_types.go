@@ -27,24 +27,36 @@ const (
 // fields are always serialized, so an explicit 0 survives a round trip and an
 // absent field is distinguishable in the raw JSON.
 //
-// Phase 1 intent: both fields required and non-negative; an Agent's budget
-// must not exceed its Tenant's (FR-POL-2).
+// CRD schema (P1-T1): both fields are required and must be integers >= 0
+// within their Go ranges (int64 and int32; the API server does not enforce the
+// int32 format on its own, so the int32 maximum is an explicit marker); 0 is accepted and kept as a real
+// limit, never treated as absent or unlimited. An Agent's budget must not
+// exceed its Tenant's (FR-POL-2): that cross-resource rule is a later
+// validating webhook (P1-T4), not part of this schema.
 type Budget struct {
 	// TokensPerDay is the daily token cap for the fixed UTC budget window.
+	// +kubebuilder:validation:Minimum=0
 	TokensPerDay int64 `json:"tokensPerDay"`
 	// RequestsPerMinute is the request rate limit (token-bucket refill rate
 	// per minute; burst semantics are in ADR-005).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2147483647
 	RequestsPerMinute int32 `json:"requestsPerMinute"`
 }
 
 // TenantQuota is the compute quota a Tenant controller would turn into a
-// ResourceQuota (Phase 1).
+// ResourceQuota (Phase 1). The CRD schema checks that cpu and memory are
+// present and are Kubernetes quantity-shaped values (the generated
+// resource.Quantity schema); it does not reject a semantically negative or
+// nonsensical quantity. That policy belongs to the later validation work.
 type TenantQuota struct {
 	// CPU is the total CPU quota, for example "4".
 	CPU resource.Quantity `json:"cpu"`
 	// Memory is the total memory quota, for example "8Gi".
 	Memory resource.Quantity `json:"memory"`
 	// Pods is the maximum number of pods.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2147483647
 	Pods int32 `json:"pods"`
 }
 
@@ -60,6 +72,7 @@ type TenantEgress struct {
 // TenantSpec is the desired state of a Tenant.
 type TenantSpec struct {
 	// DisplayName is a human-readable name.
+	// +kubebuilder:validation:MinLength=1
 	DisplayName string `json:"displayName"`
 	// Quota is the compute quota.
 	Quota TenantQuota `json:"quota"`
@@ -83,17 +96,20 @@ type TenantStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// Tenant is a cluster-scoped resource created by a platform admin.
-//
-// Phase 1 intent: CRD scope Cluster with a status subresource.
+// Tenant is a cluster-scoped resource created by a platform admin. The CRD is
+// Cluster-scoped, serves and stores v1alpha1 and has a status subresource.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="DisplayName",type=string,JSONPath=`.spec.displayName`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type Tenant struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// +required
 	Spec   TenantSpec   `json:"spec,omitempty"`
 	Status TenantStatus `json:"status,omitempty"`
 }

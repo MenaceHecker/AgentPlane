@@ -1,0 +1,4 @@
+# The two generated CRDs only (P1-T1). No manager, RBAC, webhook or namespace resources belong here.
+resources:
+- bases/agentplane.io_tenants.yaml
+- bases/agentplane.io_agents.yaml

@@ -1,0 +1,3 @@
+generate: deepcopy code is current
+manifests: CRDs are current
+check-generated: OK (nothing changed, nothing committed or staged by this check)

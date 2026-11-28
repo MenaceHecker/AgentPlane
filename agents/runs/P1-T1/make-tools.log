@@ -1,0 +1,1 @@
+tools: controller-gen v0.23.0 and setup-envtest v0.25.3 (commit 18149e6fafab1fe3966fd13a65c1d4273558afef) installed in ./bin

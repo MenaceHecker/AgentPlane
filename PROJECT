@@ -1,0 +1,27 @@
+# Kubebuilder project metadata (P1-T1). Written by hand from the scratch reference scaffold
+# (kubebuilder v4.16.0, go/v4 plugin, layout version 3); `kubebuilder init` was never run in this
+# repository. domain io + group agentplane = the API group agentplane.io. Tenant is cluster-scoped
+# (no `namespaced`), Agent is namespaced. No controllers and no webhooks are scaffolded.
+cliVersion: 4.16.0
+domain: io
+layout:
+- go.kubebuilder.io/v4
+projectName: agentplane
+repo: github.com/MenaceHecker/AgentPlane
+resources:
+- api:
+    crdVersion: v1
+  domain: io
+  group: agentplane
+  kind: Tenant
+  path: github.com/MenaceHecker/AgentPlane/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: io
+  group: agentplane
+  kind: Agent
+  path: github.com/MenaceHecker/AgentPlane/api/v1alpha1
+  version: v1alpha1
+version: "3"
