@@ -2,11 +2,12 @@
 // group: the Tenant and Agent resources described in section 4 of the
 // requirements.
 //
-// Phase 0 scope: these are typed contracts only. No CRD manifest is
-// generated or installed, no controller, webhook or admission validation
-// exists, and nothing here enforces a budget, quota or policy. The comments
-// marked "Phase 1 intent" describe the schema validation that Phase 1 adds;
-// they are not enforced by these types.
+// CRD generation (P1-T1): the +kubebuilder markers on these types are turned
+// into the Tenant and Agent CRDs under config/crd/bases by the pinned
+// controller-gen (make manifests). The schema validates the shape of each
+// object. Reconciliation, the cross-resource webhook, quota and registry
+// policy, and any runtime enforcement of budgets are later work; nothing in
+// this package enforces them.
 //
 // +kubebuilder:object:generate=true
 // +groupName=agentplane.io
