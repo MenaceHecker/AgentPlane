@@ -1,0 +1,212 @@
+test-envtest: Kubernetes 1.35.0 assets at <repo>/bin/envtest-assets/k8s/1.35.0-darwin-arm64 (kube-apiserver and etcd match the pinned official SHA-512)
+=== RUN   TestAgentCRDIsStructuralNamespacedAndEstablished
+--- PASS: TestAgentCRDIsStructuralNamespacedAndEstablished (0.00s)
+=== RUN   TestAgentValidObjectIsAcceptedAndStoredExactly
+--- PASS: TestAgentValidObjectIsAcceptedAndStoredExactly (2.01s)
+=== RUN   TestAgentReplicasAbsentStaysAbsentAndExplicitZeroIsKept
+--- PASS: TestAgentReplicasAbsentStaysAbsentAndExplicitZeroIsKept (0.01s)
+=== RUN   TestAgentToolsAndSandboxClassAreOptional
+--- PASS: TestAgentToolsAndSandboxClassAreOptional (0.01s)
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.image
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.model
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.resources
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute
+--- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.image (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.model (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.resources (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute (0.00s)
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_image
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_model
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_image
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_replicas
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/replicas_above_int32
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/fractional_replicas
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_replicas
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/unsupported_sandbox_class
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_sandbox_class
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/resources_that_is_not_an_object
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/cpu_request_that_is_not_a_quantity
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/boolean_memory_limit
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/object_tools
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_tools_item
+--- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected (0.01s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_image (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_model (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_image (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_replicas (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/replicas_above_int32 (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/fractional_replicas (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_replicas (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64 (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32 (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/unsupported_sandbox_class (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_sandbox_class (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/resources_that_is_not_an_object (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/cpu_request_that_is_not_a_quantity (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/boolean_memory_limit (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/object_tools (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_tools_item (0.00s)
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.strategy
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.steps
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.errorRate
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.p95LatencyMs
+--- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.strategy (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.steps (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.errorRate (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.p95LatencyMs (0.00s)
+=== RUN   TestAgentResourcePolicyIsDeferredSchemaOnlyChecksTheShape
+--- PASS: TestAgentResourcePolicyIsDeferredSchemaOnlyChecksTheShape (0.00s)
+=== RUN   TestAgentUnknownFieldsArePrunedNotRejected
+--- PASS: TestAgentUnknownFieldsArePrunedNotRejected (0.00s)
+=== RUN   TestAgentIsNamespacedAndSameNameCanLiveInTwoNamespaces
+--- PASS: TestAgentIsNamespacedAndSameNameCanLiveInTwoNamespaces (0.01s)
+=== RUN   TestAgentStatusIsWrittenOnlyThroughTheStatusSubresource
+--- PASS: TestAgentStatusIsWrittenOnlyThroughTheStatusSubresource (0.01s)
+=== RUN   TestAgentConditionsAreAListMapKeyedByType
+--- PASS: TestAgentConditionsAreAListMapKeyedByType (0.01s)
+=== RUN   TestAgentTableLeavesUnknownReplicasAndReadyBlank
+--- PASS: TestAgentTableLeavesUnknownReplicasAndReadyBlank (0.00s)
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_int32_minimum
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_just_above_int32_minimum
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_zero
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_int32_maximum
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_rejects_just_below_int32_minimum
+    agent_test.go:455: want 422 Invalid, got 201: {"apiVersion":"agentplane.io/v1alpha1","kind":"Agent","metadata":{"creationTimestamp":"2026-11-28T17:06:28Z","generation":1,"managedFields":[{"apiVersion":"agentplane.io/v1alpha1","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{".":{},"f:budget":{".":{},"f:requestsPerMinute":{},"f:tokensPerDay":{}},"f:image":{},"f:model":{},"f:resources":{".":{},"f:limits":{".":{},"f:cpu":{},"f:memory":{}},"f:requests":{".":{},"f:cpu":{},"f:memory":{}}},"f:rollout":{".":{},"f:slo":{".":{},"f:errorRate":{},"f:p95LatencyMs":{}},"f:steps":{},"f:strategy":{}}}},"manager":"Go-http-client","operation":"Update","time":"2026-11-28T17:06:28Z"}],"name":"agent-int32-bad-55","namespace":"default","resourceVersion":"256","uid":"8cb01160-3e57-4330-b40d-0bbbf10764d7"},"spec":{"budget":{"requestsPerMinute":10,"tokensPerDay":5000},"image":"registry.example.invalid/team-a/agent:1.0.0","model":"mock-large","resources":{"limits":{"cpu":"500m","memory":"256Mi"},"requests":{"cpu":"100m","memory":"128Mi"}},"rollout":{"slo":{"errorRate":"\u003c1%","p95LatencyMs":500},"steps":[-2147483649],"strategy":"canary"}}}
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_rejects_just_above_int32_maximum
+    agent_test.go:455: want 422 Invalid, got 201: {"apiVersion":"agentplane.io/v1alpha1","kind":"Agent","metadata":{"creationTimestamp":"2026-11-28T17:06:28Z","generation":1,"managedFields":[{"apiVersion":"agentplane.io/v1alpha1","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{".":{},"f:budget":{".":{},"f:requestsPerMinute":{},"f:tokensPerDay":{}},"f:image":{},"f:model":{},"f:resources":{".":{},"f:limits":{".":{},"f:cpu":{},"f:memory":{}},"f:requests":{".":{},"f:cpu":{},"f:memory":{}}},"f:rollout":{".":{},"f:slo":{".":{},"f:errorRate":{},"f:p95LatencyMs":{}},"f:steps":{},"f:strategy":{}}}},"manager":"Go-http-client","operation":"Update","time":"2026-11-28T17:06:28Z"}],"name":"agent-int32-bad-56","namespace":"default","resourceVersion":"258","uid":"4fc0c713-b99c-41d4-a52f-743f6d19ab70"},"spec":{"budget":{"requestsPerMinute":10,"tokensPerDay":5000},"image":"registry.example.invalid/team-a/agent:1.0.0","model":"mock-large","resources":{"limits":{"cpu":"500m","memory":"256Mi"},"requests":{"cpu":"100m","memory":"128Mi"}},"rollout":{"slo":{"errorRate":"\u003c1%","p95LatencyMs":500},"steps":[2147483648],"strategy":"canary"}}}
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_int32_minimum
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_just_above_int32_minimum
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_zero
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_int32_maximum
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_rejects_just_below_int32_minimum
+    agent_test.go:455: want 422 Invalid, got 201: {"apiVersion":"agentplane.io/v1alpha1","kind":"Agent","metadata":{"creationTimestamp":"2026-11-28T17:06:28Z","generation":1,"managedFields":[{"apiVersion":"agentplane.io/v1alpha1","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{".":{},"f:budget":{".":{},"f:requestsPerMinute":{},"f:tokensPerDay":{}},"f:image":{},"f:model":{},"f:resources":{".":{},"f:limits":{".":{},"f:cpu":{},"f:memory":{}},"f:requests":{".":{},"f:cpu":{},"f:memory":{}}},"f:rollout":{".":{},"f:slo":{".":{},"f:errorRate":{},"f:p95LatencyMs":{}},"f:steps":{},"f:strategy":{}}}},"manager":"Go-http-client","operation":"Update","time":"2026-11-28T17:06:28Z"}],"name":"agent-int32-bad-61","namespace":"default","resourceVersion":"268","uid":"af9371e3-7b1f-4e81-9f3f-98ca83734800"},"spec":{"budget":{"requestsPerMinute":10,"tokensPerDay":5000},"image":"registry.example.invalid/team-a/agent:1.0.0","model":"mock-large","resources":{"limits":{"cpu":"500m","memory":"256Mi"},"requests":{"cpu":"100m","memory":"128Mi"}},"rollout":{"slo":{"errorRate":"\u003c1%","p95LatencyMs":-2147483649},"steps":[10],"strategy":"canary"}}}
+=== RUN   TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_rejects_just_above_int32_maximum
+    agent_test.go:455: want 422 Invalid, got 201: {"apiVersion":"agentplane.io/v1alpha1","kind":"Agent","metadata":{"creationTimestamp":"2026-11-28T17:06:28Z","generation":1,"managedFields":[{"apiVersion":"agentplane.io/v1alpha1","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{".":{},"f:budget":{".":{},"f:requestsPerMinute":{},"f:tokensPerDay":{}},"f:image":{},"f:model":{},"f:resources":{".":{},"f:limits":{".":{},"f:cpu":{},"f:memory":{}},"f:requests":{".":{},"f:cpu":{},"f:memory":{}}},"f:rollout":{".":{},"f:slo":{".":{},"f:errorRate":{},"f:p95LatencyMs":{}},"f:steps":{},"f:strategy":{}}}},"manager":"Go-http-client","operation":"Update","time":"2026-11-28T17:06:28Z"}],"name":"agent-int32-bad-62","namespace":"default","resourceVersion":"270","uid":"130decb7-806b-4520-a1a1-ceae57cc5709"},"spec":{"budget":{"requestsPerMinute":10,"tokensPerDay":5000},"image":"registry.example.invalid/team-a/agent:1.0.0","model":"mock-large","resources":{"limits":{"cpu":"500m","memory":"256Mi"},"requests":{"cpu":"100m","memory":"128Mi"}},"rollout":{"slo":{"errorRate":"\u003c1%","p95LatencyMs":2147483648},"steps":[10],"strategy":"canary"}}}
+--- FAIL: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore (0.02s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_int32_minimum (0.00s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_just_above_int32_minimum (0.00s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_zero (0.00s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_accepts_int32_maximum (0.00s)
+    --- FAIL: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_rejects_just_below_int32_minimum (0.00s)
+    --- FAIL: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/steps_item_rejects_just_above_int32_maximum (0.00s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_int32_minimum (0.00s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_just_above_int32_minimum (0.00s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_zero (0.00s)
+    --- PASS: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_accepts_int32_maximum (0.00s)
+    --- FAIL: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_rejects_just_below_int32_minimum (0.00s)
+    --- FAIL: TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore/p95LatencyMs_rejects_just_above_int32_maximum (0.00s)
+=== RUN   TestManagerServesHealthAndReadinessOnLoopbackAndStopsCleanly
+--- PASS: TestManagerServesHealthAndReadinessOnLoopbackAndStopsCleanly (0.10s)
+=== RUN   TestManagerReconcilesNothingAndAddsNoLeaseOrOwnedObjects
+--- PASS: TestManagerReconcilesNothingAndAddsNoLeaseOrOwnedObjects (3.12s)
+=== RUN   TestManagerFailsWhenAnEndpointPortIsAlreadyInUse
+--- PASS: TestManagerFailsWhenAnEndpointPortIsAlreadyInUse (0.00s)
+=== RUN   TestManagerRefusesBadAddressesWithoutStarting
+--- PASS: TestManagerRefusesBadAddressesWithoutStarting (0.00s)
+=== RUN   TestManagerSchemeRecognizesTheServedCRDKinds
+--- PASS: TestManagerSchemeRecognizesTheServedCRDKinds (0.00s)
+=== RUN   TestTenantCRDIsStructuralClusterScopedAndEstablished
+--- PASS: TestTenantCRDIsStructuralClusterScopedAndEstablished (0.00s)
+=== RUN   TestTenantValidObjectIsAcceptedAndStoredExactly
+--- PASS: TestTenantValidObjectIsAcceptedAndStoredExactly (0.00s)
+=== RUN   TestTenantZeroValuesAreAcceptedAndKeptNotTreatedAsAbsent
+--- PASS: TestTenantZeroValuesAreAcceptedAndKeptNotTreatedAsAbsent (0.00s)
+=== RUN   TestTenantEgressAllowedToolsMayBeAbsentOrEmptyAndIsKeptAsGiven
+--- PASS: TestTenantEgressAllowedToolsMayBeAbsentOrEmptyAndIsKeptAsGiven (0.00s)
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.displayName
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.egress
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.cpu
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.memory
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.pods
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute
+--- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.displayName (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.egress (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.cpu (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.memory (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.pods (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute (0.00s)
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/empty_displayName
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_pods
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/pods_above_int32
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_tokensPerDay
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_pods
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_displayName
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/boolean_cpu
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/cpu_that_is_not_a_quantity
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/memory_that_is_not_a_quantity
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/object_allowedTools
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_allowedTools_item
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_budget
+--- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected (0.01s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/empty_displayName (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_pods (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64 (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32 (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/pods_above_int32 (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_tokensPerDay (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_pods (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_displayName (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/boolean_cpu (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/cpu_that_is_not_a_quantity (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/memory_that_is_not_a_quantity (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/object_allowedTools (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_allowedTools_item (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_budget (0.00s)
+=== RUN   TestTenantQuantityPolicyIsDeferredSchemaOnlyChecksTheShape
+--- PASS: TestTenantQuantityPolicyIsDeferredSchemaOnlyChecksTheShape (0.00s)
+=== RUN   TestTenantUnknownFieldsArePrunedNotRejected
+--- PASS: TestTenantUnknownFieldsArePrunedNotRejected (0.00s)
+=== RUN   TestTenantIsClusterScopedNotNamespaced
+--- PASS: TestTenantIsClusterScopedNotNamespaced (0.00s)
+=== RUN   TestTenantStatusIsWrittenOnlyThroughTheStatusSubresource
+--- PASS: TestTenantStatusIsWrittenOnlyThroughTheStatusSubresource (0.01s)
+=== RUN   TestTenantConditionsAreAListMapKeyedByType
+--- PASS: TestTenantConditionsAreAListMapKeyedByType (0.01s)
+=== RUN   TestTenantTableShowsDisplayNameAndAnUnknownReadyIsBlankNotSuccess
+--- PASS: TestTenantTableShowsDisplayNameAndAnUnknownReadyIsBlankNotSuccess (0.00s)
+FAIL
+FAIL	github.com/MenaceHecker/AgentPlane/internal/apitest	9.094s
+FAIL
+make: *** [test-envtest] Error 1
+exit=2

@@ -23,7 +23,11 @@ type RolloutSLO struct {
 	// ErrorRate is the maximum tolerated error rate in the requirements'
 	// format, for example "<1%". Parsing and validation are Phase 5 work.
 	ErrorRate string `json:"errorRate"`
-	// P95LatencyMs is the maximum tolerated p95 latency in milliseconds.
+	// P95LatencyMs is the maximum tolerated p95 latency in milliseconds. The CRD
+	// enforces only the signed int32 range the Go type can represent; value
+	// policy (for example positive latency) is Phase 5 work.
+	// +kubebuilder:validation:Minimum=-2147483648
+	// +kubebuilder:validation:Maximum=2147483647
 	P95LatencyMs int32 `json:"p95LatencyMs"`
 }
 
@@ -32,7 +36,10 @@ type RolloutSpec struct {
 	// Strategy is the delivery strategy, for example "canary".
 	Strategy string `json:"strategy"`
 	// Steps are the traffic weights, in percent, a canary passes through, for
-	// example [10, 50, 100].
+	// example [10, 50, 100]. The CRD enforces only the signed int32 range each
+	// item can represent; weight policy (0 to 100, ordering) is Phase 5 work.
+	// +kubebuilder:validation:items:Minimum=-2147483648
+	// +kubebuilder:validation:items:Maximum=2147483647
 	Steps []int32 `json:"steps"`
 	// SLO are the analysis thresholds.
 	SLO RolloutSLO `json:"slo"`

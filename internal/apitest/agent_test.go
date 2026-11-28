@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,6 +12,8 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/MenaceHecker/AgentPlane/api/v1alpha1"
 )
 
 func agentsPath(ns string) string { return "/apis/agentplane.io/v1alpha1/namespaces/" + ns + "/agents" }
@@ -390,5 +393,67 @@ func TestAgentTableLeavesUnknownReplicasAndReadyBlank(t *testing.T) {
 	_, cells = table()
 	if fmt.Sprint(cells[1]) != "4" {
 		t.Errorf("Replicas cell = %v, want 4 once set", cells[1])
+	}
+}
+
+// TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore pins the representability contract of
+// rollout.steps items and rollout.slo.p95LatencyMs: the CRD must accept exactly what the existing Go
+// int32 fields can hold, and the stored object must decode into the unchanged typed Agent. The API
+// server does not enforce format int32 here, so without explicit bounds 2147483648 is admitted (201)
+// and then cannot be decoded by a typed client. No value policy (nonnegative steps, positive
+// latency) is imposed: negative values inside the int32 range stay accepted.
+func TestAgentRolloutInt32FieldsCoverTheWholeGoRangeAndNothingMore(t *testing.T) {
+	defer guard(t)
+	s := need(t)
+	rollout := func(steps, p95 json.Number) map[string]any {
+		return map[string]any{"strategy": "canary", "steps": []any{steps}, "slo": map[string]any{"errorRate": "<1%", "p95LatencyMs": p95}}
+	}
+	fields := []struct {
+		name  string
+		field string // the cause path the server must name
+		build func(v json.Number) map[string]any
+		read  func(a *v1alpha1.Agent) int32
+	}{
+		{"steps item", "spec.rollout.steps[0]", func(v json.Number) map[string]any { return rollout(v, "500") },
+			func(a *v1alpha1.Agent) int32 { return a.Spec.Rollout.Steps[0] }},
+		{"p95LatencyMs", "spec.rollout.slo.p95LatencyMs", func(v json.Number) map[string]any { return rollout("10", v) },
+			func(a *v1alpha1.Agent) int32 { return a.Spec.Rollout.SLO.P95LatencyMs }},
+	}
+	valid := []struct {
+		name string
+		v    string
+		want int32
+	}{{"int32 minimum", "-2147483648", math.MinInt32}, {"just above int32 minimum", "-2147483647", math.MinInt32 + 1}, {"zero", "0", 0}, {"int32 maximum", "2147483647", math.MaxInt32}}
+	invalid := []struct{ name, v string }{{"just below int32 minimum", "-2147483649"}, {"just above int32 maximum", "2147483648"}}
+	for _, f := range fields {
+		for _, c := range valid {
+			t.Run(f.name+" accepts "+c.name, func(t *testing.T) {
+				defer guard(t)
+				obj := with(validAgent(s.unique("agent-int32")), f.build(json.Number(c.v)), "spec", "rollout")
+				name := obj["metadata"].(map[string]any)["name"].(string)
+				requireCreated(t, s.createAgent(t, "default", obj))
+				got := s.get(t, agentsPath("default")+"/"+name)
+				if got.Code != http.StatusOK {
+					t.Fatalf("GET %s: %d %s", name, got.Code, got.Body)
+				}
+				var a v1alpha1.Agent
+				if err := json.Unmarshal(got.Body, &a); err != nil {
+					t.Fatalf("stored Agent does not decode into the typed API: %v\n%s", err, got.Body)
+				}
+				if a.Spec.Rollout == nil || len(a.Spec.Rollout.Steps) != 1 {
+					t.Fatalf("typed rollout lost: %+v", a.Spec.Rollout)
+				}
+				if v := f.read(&a); v != c.want {
+					t.Errorf("typed value = %d, want %d", v, c.want)
+				}
+			})
+		}
+		for _, c := range invalid {
+			t.Run(f.name+" rejects "+c.name, func(t *testing.T) {
+				defer guard(t)
+				obj := with(validAgent(s.unique("agent-int32-bad")), f.build(json.Number(c.v)), "spec", "rollout")
+				requireRejected(t, s.createAgent(t, "default", obj), f.field)
+			})
+		}
 	}
 }

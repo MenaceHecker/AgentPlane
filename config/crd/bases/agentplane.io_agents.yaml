@@ -173,9 +173,13 @@ spec:
                           format, for example "<1%". Parsing and validation are Phase 5 work.
                         type: string
                       p95LatencyMs:
-                        description: P95LatencyMs is the maximum tolerated p95 latency
-                          in milliseconds.
+                        description: |-
+                          P95LatencyMs is the maximum tolerated p95 latency in milliseconds. The CRD
+                          enforces only the signed int32 range the Go type can represent; value
+                          policy (for example positive latency) is Phase 5 work.
                         format: int32
+                        maximum: 2147483647
+                        minimum: -2147483648
                         type: integer
                     required:
                     - errorRate
@@ -184,9 +188,12 @@ spec:
                   steps:
                     description: |-
                       Steps are the traffic weights, in percent, a canary passes through, for
-                      example [10, 50, 100].
+                      example [10, 50, 100]. The CRD enforces only the signed int32 range each
+                      item can represent; weight policy (0 to 100, ordering) is Phase 5 work.
                     items:
                       format: int32
+                      maximum: 2147483647
+                      minimum: -2147483648
                       type: integer
                     type: array
                   strategy:
