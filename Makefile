@@ -10,6 +10,9 @@ KIND_VERSION ?= 0.31.0
 # Trivy. Not named TRIVY_*: Trivy reads TRIVY_* environment variables as flags.
 IMAGE_SCANNER_VERSION ?= 0.76.2
 MOCK_IMAGE ?= agentplane/mockmodel:p0
+# Kubernetes version of the disposable envtest API server: exactly 1.35.0 or 1.37.0 (P1-T1). The generator
+# pins (controller-tools, setup-envtest) are fixed in scripts/api-tools.sh and are not make inputs.
+ENVTEST_K8S_VERSION ?= 1.35.0
 
 # Local kind cluster name. Only this named cluster is ever created or deleted.
 KIND_CLUSTER_NAME ?= agentplane
@@ -36,7 +39,8 @@ KIND_CLUSTER_NAME ?= agentplane
 # VALUES from being interpreted. Add a variable to DATA_VARS before a script starts reading it
 # (scripts/test-make-args.sh fails if the list and the documentation disagree).
 DATA_VARS := GOLANGCI_LINT_VERSION GITLEAKS_VERSION KIND_VERSION IMAGE_SCANNER_VERSION MOCK_IMAGE \
-  KIND_CLUSTER_NAME MOCK_ARGS KIND_CONFIG KINDSHAPE_BIN SCAN_EVIDENCE_DIR TMPDIR KUBECONFIG
+  KIND_CLUSTER_NAME MOCK_ARGS KIND_CONFIG KINDSHAPE_BIN SCAN_EVIDENCE_DIR TMPDIR KUBECONFIG \
+  ENVTEST_K8S_VERSION
 
 define capture_data
 ifneq ($$(origin $(1)),undefined)
@@ -128,3 +132,23 @@ secrets-selftest: ## Regression-test the secret scanner itself (needs gitleaks)
 .PHONY: contracts-check
 contracts-check: ## Validate gateway and audit contract fixtures (needs go and python3)
 	@scripts/check-contracts.sh
+
+.PHONY: tools
+tools: ## Install the pinned controller-gen and setup-envtest into ./bin (go install @version; nothing global)
+	@scripts/api-tools.sh tools
+
+.PHONY: generate
+generate: ## Regenerate the API deepcopy code with the pinned controller-gen
+	@scripts/api-tools.sh generate
+
+.PHONY: manifests
+manifests: ## Regenerate the Tenant and Agent CRDs under config/crd/bases with the pinned controller-gen
+	@scripts/api-tools.sh manifests
+
+.PHONY: check-generated
+check-generated: ## Regenerate and fail if api/ or config/crd/ drift from the committed files (commits nothing)
+	@scripts/api-tools.sh check-generated
+
+.PHONY: test-envtest
+test-envtest: ## Run the CRD admission suites on a disposable local API server (ENVTEST_K8S_VERSION=1.35.0 or 1.37.0)
+	@scripts/api-tools.sh test-envtest
