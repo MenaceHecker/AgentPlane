@@ -16,7 +16,7 @@ DRAFT means planned but awaiting owner approval; PLANNED means the owner approve
 | P0-T3 | `phase-0/api-contracts` | MERGED | [PR #5](https://github.com/MenaceHecker/AgentPlane/pull/5), [PR #6](https://github.com/MenaceHecker/AgentPlane/pull/6) | 2026-11-26 |
 | P0-T4 | `phase-0/mockmodel` | MERGED | [PR #7](https://github.com/MenaceHecker/AgentPlane/pull/7) | 2026-11-26 |
 | P0-T5 | `phase-0/kind` | MERGED | [PR #8](https://github.com/MenaceHecker/AgentPlane/pull/8) | 2026-11-27 |
-| P1-T1 | `phase-1/scaffold` | DRAFT | — | 2026-11-27 |
+| P1-T1 | `phase-1/scaffold` | READY_FOR_REVIEW | PR pending | 2026-11-27 |
 | P1-T2 | `phase-1/tenant-controller` | DRAFT | — | 2026-11-26 |
 | P1-T3 | `phase-1/agent-controller` | DRAFT | — | 2026-11-26 |
 | P1-T4 | `phase-1/validation-webhook` | DRAFT | — | 2026-11-26 |
@@ -72,5 +72,5 @@ The local unstaged root-prompt deletion remains unrelated owner-managed workspac
 
 ## Next phase planning
 
-[P1-T1 detailed scaffold plan](../agents/plans/P1-T1.md) is DRAFT on `phase-1/scaffold`. The Phase 0 entry gate is now owner-confirmed; execution awaits approval of this individual plan. Planning selects proposed pinned tools, preserves existing API contracts and defines schema/manager/envtest acceptance; no Phase 1 product implementation or live resource change has occurred.
+[P1-T1 plan](../agents/plans/P1-T1.md), [run report](../agents/runs/P1-T1.md): **READY_FOR_REVIEW** (executor results; awaiting Codex review and final-head CI; no self-approval). The owner approved the plan; implementation is four code commits on `phase-1/scaffold` (`a1fc24d`, `b1cda47`, `8329d2e`, `4819f6e`). Tested at `4819f6e82b45d2ed3548cb1869f861a448fe6710` on a clean clone: generated Tenant and Agent CRDs reproduce with controller-gen v0.23.0 and render alone through `kubectl kustomize`; the admission suites pass on disposable envtest API servers for Kubernetes 1.35.0 and 1.37.0 (30 top-level, 88 total tests each, 0 skipped); the manager scaffold starts on loopback, reconciles nothing and stops cleanly; the existing Phase 0 regression batch and all three secret scans pass; existing API Go code differs only in markers and comments. Not claimed: reconciliation, the cross-resource webhook (P1-T4), runtime status or events, quota or registry policy (the schema accepts a negative CPU quantity and an empty `resources`, pinned in tests as deferred), leader election (P1-T7), or any Phase 1 completion. **Open:** final-head CI and Codex review; two envtest processes (`etcd` 84174, `kube-apiserver` 84178) left by an earlier test panic are still running on the executor host and were not killed (details in the run report). P1-T2 to P1-T7 remain DRAFT and are not started.
 - [Phase 1 draft roadmap](../agents/plans/P1.md): P1-T1 through P1-T7 proposed, execution gated on owner-confirmed Phase 0 exit. Individual approved task plans still required.
