@@ -13,7 +13,7 @@ below; other hosts are not claimed to work.
 | Docker | Docker Desktop 29.9.3, aarch64, cgroup v2, overlayfs storage driver; the Docker VM had 11 CPUs and about 8.3 GB of memory |
 | kind | v0.31.0 (Homebrew), default CNI |
 | kubectl | v1.36.0 client |
-| Go | 1.27.3 (declared by `go.mod`) |
+| Go | 1.27.3 (measured in the earlier recorded runs; historical). `go.mod` now declares 1.27.4, which is not recorded here as a tested-host value until a recorded run supports it |
 | golangci-lint / gitleaks / pre-commit | 2.15.0 / 8.30.1 / 4.7.0 |
 | Trivy | 0.76.2 |
 | bash / python3 | 3.2.57 (macOS `/bin/bash`; the scripts avoid newer features) / 3.14 |
@@ -28,7 +28,7 @@ CI**, and creating one on Linux or on amd64 hardware has not been tested.
 | --- | --- | --- |
 | Git, GNU Make, curl, python3 | any recent; the sources state Python 3.8 or newer (standard library only), but 3.8 was **not tested**: only the versions in the table above were | OS package manager |
 | A POSIX host (macOS or Linux) | any recent | The smoke runner and the kind script are Python programs that start and collect their own child processes directly. They do not use `ps`, the shell job table, a PID file or a process-group signal ([ADR-007](adr/ADR-007-owned-process-supervision.md)), so there is no process-listing prerequisite |
-| Go | the `go` directive in `go.mod` (1.27.3) | https://go.dev/dl |
+| Go | the `go` directive in `go.mod` (1.27.4; the fixed patch for GO-2026-6859 / CVE-2026-97054 in the 1.27 line). | https://go.dev/dl |
 | Docker (Desktop or Engine) | running daemon; cgroup v2 | https://docs.docker.com/get-docker |
 | kind | **v0.31.0 exactly** (the script refuses any other) | `brew install kind` or the release binary, see [`deploy/kind/README.md`](../deploy/kind/README.md) |
 | kubectl | within one minor version of Kubernetes 1.35 | `brew install kubectl` |
@@ -129,11 +129,14 @@ refused. The JSON report is kept in `$TMPDIR/agentplane-p0-t5-evidence` (overrid
 with `SCAN_EVIDENCE_DIR`). The recorded results of the last verified run are in
 [`agents/runs/P0-T5.md`](../agents/runs/P0-T5.md).
 
-**Base image pins.** The Dockerfile pins `golang:1.27.3-bookworm` and
+**Base image pins.** The Dockerfile pins `golang:1.27.4-bookworm` and
 `gcr.io/distroless/static-debian13:nonroot` by the digest of their multi-arch OCI
-index (resolved with `docker buildx imagetools inspect <image>` on 2026-11-25).
-To update, resolve the new digest the same way, change the Dockerfile, rebuild,
-rescan and record the digests in the run report.
+index. The builder digest (`sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34`,
+amd64 and arm64 entries present) was resolved with
+`docker buildx imagetools inspect golang:1.27.4-bookworm` on 2026-11-27; the
+runtime digest is unchanged from its resolution on 2026-11-25. To update, resolve
+the new digest the same way, change the Dockerfile, rebuild, rescan and record
+the digests in the run report.
 
 ## Troubleshooting
 
@@ -147,8 +150,8 @@ rescan and record the digests in the run report.
 | `could not restore your kubectl current context` | kubectl refused `use-context` or `unset`. Run the command the message prints, then check `kubectl config current-context`. The cluster itself was created or checked. |
 | Smoke runner: `some child is lost, uncollected or unregistered, so the workdir <path> was kept for inspection` | The runner could not confirm that every child it started was collected, so it kept its private directory and did not delete it. Read the `children:` line in the output for each child's state. Before you stop anything or remove the directory, see "Manual inspection" below. |
 | Kind script: `some child is lost, uncollected or unregistered, so the private workdir <path> was kept for inspection`, together with `<tool>: lost ownership (<reason>); it was not signalled again and may still be running` or `<tool>: not collected within the reap deadline; cleanup is incomplete and it may still be running` | Same meaning for the kind script's own tools: ownership was lost or collection was not confirmed, the tool may still be running, and the directory was kept. See "Manual inspection" below. |
-| `<name> ignored SIGTERM and had to be killed` (kind script; the smoke runner reports the same condition in its failure list) | This is **timeout escalation, not lost ownership**: the runner sent SIGTERM, waited its bounded interval, sent SIGKILL and collected the child. The run fails, but the child is collected and nothing is left running by it. |
-| Kind script: `<command> did not finish within <N> s and was stopped`, optionally followed by `; it could not be collected, so cleanup is incomplete` | The command exceeded its deadline and the runner stopped it (bounded SIGTERM then SIGKILL). Without the suffix the child was collected. With the suffix, collection was not confirmed: treat it as the lost/uncollected case above. |
+| `<name> ignored SIGTERM and had to be killed` (kind script; the smoke runner reports the same condition in its failure list) | This is **timeout escalation, not lost ownership**: the runner sent SIGTERM, waited its bounded interval, and because the child was still running sent SIGKILL and then collected it. Escalation happens only when needed; a child that exits after SIGTERM is never sent SIGKILL. The run fails, but the child is collected. |
+| Kind script: `<command> did not finish within <N> s and was stopped`, optionally followed by `; it could not be collected, so cleanup is incomplete` | The command exceeded its deadline and the runner stopped it with bounded escalation (SIGTERM first, SIGKILL only if it was still running). The suffix confirms that collection was **not** completed. **Its absence does not prove the child was collected**: a child whose ownership was lost is also finished from the runner's point of view and carries no suffix. Always read the final ownership diagnostics; a `lost ownership (...)` or `not collected within the reap deadline` line overrides any "was stopped" wording, and the directory-kept message means collection was not confirmed. Treat those as the lost/uncollected case above. |
 | `Trivy 0.76.2 is required` or `SCAN_TRIVY_VERSION is not set` | Install the pinned Trivy and run through `make mock-image-scan`. |
 | scan: `NOT a pass` / `INVALID REPORT` | The database could not be downloaded or the report is unusable. Check network access to `mirror.gcr.io`/`ghcr.io` and rerun; a failed scan is never reported as clean. |
 | scan: `GATE FAILED` | A HIGH or CRITICAL finding has a fix. Update the base image or Go version and rebuild. |
