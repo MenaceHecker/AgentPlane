@@ -1,0 +1,86 @@
+test-envtest: Kubernetes 1.35.0 assets at <home>/Dev/AgentPlane/bin/envtest-assets/k8s/1.35.0-darwin-arm64
+=== RUN   TestTenantCRDIsStructuralClusterScopedAndEstablished
+--- PASS: TestTenantCRDIsStructuralClusterScopedAndEstablished (0.00s)
+=== RUN   TestTenantValidObjectIsAcceptedAndStoredExactly
+--- PASS: TestTenantValidObjectIsAcceptedAndStoredExactly (2.01s)
+=== RUN   TestTenantZeroValuesAreAcceptedAndKeptNotTreatedAsAbsent
+--- PASS: TestTenantZeroValuesAreAcceptedAndKeptNotTreatedAsAbsent (0.00s)
+=== RUN   TestTenantEgressAllowedToolsMayBeAbsentOrEmptyAndIsKeptAsGiven
+--- PASS: TestTenantEgressAllowedToolsMayBeAbsentOrEmptyAndIsKeptAsGiven (0.01s)
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.displayName
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.egress
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.cpu
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.memory
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.pods
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay
+=== RUN   TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute
+--- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses (0.01s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.displayName (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.egress (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.cpu (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.memory (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.quota.pods (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay (0.00s)
+    --- PASS: TestTenantMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute (0.00s)
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/empty_displayName
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_pods
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32
+    tenant_test.go:207: want 422 Invalid, got 201: {"apiVersion":"agentplane.io/v1alpha1","kind":"Tenant","metadata":{"creationTimestamp":"2026-11-28T01:18:52Z","generation":1,"managedFields":[{"apiVersion":"agentplane.io/v1alpha1","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{".":{},"f:budget":{".":{},"f:requestsPerMinute":{},"f:tokensPerDay":{}},"f:displayName":{},"f:egress":{".":{},"f:allowedTools":{}},"f:quota":{".":{},"f:cpu":{},"f:memory":{},"f:pods":{}}}},"manager":"Go-http-client","operation":"Update","time":"2026-11-28T01:18:52Z"}],"name":"tenant-bad-20","resourceVersion":"217","uid":"d6fece3f-fd70-4693-adf0-80c2e6c1de6f"},"spec":{"budget":{"requestsPerMinute":2147483648,"tokensPerDay":100000},"displayName":"Team A","egress":{"allowedTools":["search"]},"quota":{"cpu":"4","memory":"8Gi","pods":10}}}
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/pods_above_int32
+    tenant_test.go:207: want 422 Invalid, got 201: {"apiVersion":"agentplane.io/v1alpha1","kind":"Tenant","metadata":{"creationTimestamp":"2026-11-28T01:18:52Z","generation":1,"managedFields":[{"apiVersion":"agentplane.io/v1alpha1","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{".":{},"f:budget":{".":{},"f:requestsPerMinute":{},"f:tokensPerDay":{}},"f:displayName":{},"f:egress":{".":{},"f:allowedTools":{}},"f:quota":{".":{},"f:cpu":{},"f:memory":{},"f:pods":{}}}},"manager":"Go-http-client","operation":"Update","time":"2026-11-28T01:18:52Z"}],"name":"tenant-bad-21","resourceVersion":"219","uid":"b1004a68-bc83-43c9-9379-6a48636a91e7"},"spec":{"budget":{"requestsPerMinute":60,"tokensPerDay":100000},"displayName":"Team A","egress":{"allowedTools":["search"]},"quota":{"cpu":"4","memory":"8Gi","pods":2147483648}}}
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_tokensPerDay
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_pods
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_displayName
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/boolean_cpu
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/cpu_that_is_not_a_quantity
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/memory_that_is_not_a_quantity
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/object_allowedTools
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_allowedTools_item
+    tenant_test.go:207: no cause names field "spec.egress.allowedTools"; causes: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"Tenant.agentplane.io \"tenant-bad-30\" is invalid: spec.egress.allowedTools[0]: Invalid value: \"integer\": spec.egress.allowedTools[0] in body must be of type string: \"integer\"","reason":"Invalid","details":{"name":"tenant-bad-30","group":"agentplane.io","kind":"Tenant","causes":[{"reason":"FieldValueTypeInvalid","message":"Invalid value: \"integer\": spec.egress.allowedTools[0] in body must be of type string: \"integer\"","field":"spec.egress.allowedTools[0]"}]},"code":422}
+=== RUN   TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_budget
+--- FAIL: TestTenantOutOfRangeAndWrongTypedValuesAreRejected (0.01s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/empty_displayName (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/negative_pods (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64 (0.00s)
+    --- FAIL: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32 (0.00s)
+    --- FAIL: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/pods_above_int32 (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_tokensPerDay (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/fractional_pods (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_displayName (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/boolean_cpu (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/cpu_that_is_not_a_quantity (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/memory_that_is_not_a_quantity (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/object_allowedTools (0.00s)
+    --- FAIL: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/numeric_allowedTools_item (0.00s)
+    --- PASS: TestTenantOutOfRangeAndWrongTypedValuesAreRejected/string_budget (0.00s)
+=== RUN   TestTenantQuantityPolicyIsDeferredSchemaOnlyChecksTheShape
+--- PASS: TestTenantQuantityPolicyIsDeferredSchemaOnlyChecksTheShape (0.00s)
+=== RUN   TestTenantUnknownFieldsArePrunedNotRejected
+--- PASS: TestTenantUnknownFieldsArePrunedNotRejected (0.00s)
+=== RUN   TestTenantIsClusterScopedNotNamespaced
+--- PASS: TestTenantIsClusterScopedNotNamespaced (0.00s)
+=== RUN   TestTenantStatusIsWrittenOnlyThroughTheStatusSubresource
+--- PASS: TestTenantStatusIsWrittenOnlyThroughTheStatusSubresource (0.01s)
+=== RUN   TestTenantConditionsAreAListMapKeyedByType
+--- PASS: TestTenantConditionsAreAListMapKeyedByType (0.01s)
+=== RUN   TestTenantTableShowsDisplayNameAndAnUnknownReadyIsBlankNotSuccess
+--- PASS: TestTenantTableShowsDisplayNameAndAnUnknownReadyIsBlankNotSuccess (0.00s)
+FAIL
+FAIL	github.com/MenaceHecker/AgentPlane/internal/apitest	7.019s
+FAIL
+make: *** [test-envtest] Error 1

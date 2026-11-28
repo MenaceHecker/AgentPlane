@@ -1,0 +1,97 @@
+test-envtest: Kubernetes 1.35.0 assets at <home>/Dev/AgentPlane/bin/envtest-assets/k8s/1.35.0-darwin-arm64
+=== RUN   TestAgentCRDIsStructuralNamespacedAndEstablished
+--- PASS: TestAgentCRDIsStructuralNamespacedAndEstablished (0.00s)
+=== RUN   TestAgentValidObjectIsAcceptedAndStoredExactly
+--- PASS: TestAgentValidObjectIsAcceptedAndStoredExactly (2.01s)
+=== RUN   TestAgentReplicasAbsentStaysAbsentAndExplicitZeroIsKept
+--- PASS: TestAgentReplicasAbsentStaysAbsentAndExplicitZeroIsKept (0.01s)
+=== RUN   TestAgentToolsAndSandboxClassAreOptional
+--- PASS: TestAgentToolsAndSandboxClassAreOptional (0.01s)
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.image
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.model
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.resources
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay
+=== RUN   TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute
+--- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses (0.01s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.image (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.model (0.01s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.resources (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.tokensPerDay (0.00s)
+    --- PASS: TestAgentMissingRequiredFieldsAreRejectedWithNamedCauses/omit_spec.budget.requestsPerMinute (0.00s)
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_image
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_model
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_image
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_replicas
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/replicas_above_int32
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/fractional_replicas
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_replicas
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/unsupported_sandbox_class
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_sandbox_class
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/resources_that_is_not_an_object
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/cpu_request_that_is_not_a_quantity
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/boolean_memory_limit
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/object_tools
+=== RUN   TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_tools_item
+--- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected (0.01s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_image (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_model (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_image (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_replicas (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/replicas_above_int32 (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/fractional_replicas (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_replicas (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_tokensPerDay (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/negative_requestsPerMinute (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/tokensPerDay_above_int64 (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/requestsPerMinute_above_int32 (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/string_tokensPerDay (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/unsupported_sandbox_class (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/empty_sandbox_class (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/resources_that_is_not_an_object (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/cpu_request_that_is_not_a_quantity (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/boolean_memory_limit (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/object_tools (0.00s)
+    --- PASS: TestAgentOutOfRangeAndWrongTypedValuesAreRejected/numeric_tools_item (0.00s)
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.strategy
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.steps
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.errorRate
+=== RUN   TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.p95LatencyMs
+--- FAIL: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.strategy (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.steps (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.errorRate (0.00s)
+    --- PASS: TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields/omit_rollout.slo.p95LatencyMs (0.00s)
+panic: interface conversion: interface {} is nil, not map[string]interface {} [recovered, repanicked]
+
+goroutine 280 [running]:
+testing.tRunner.func1.2({0x106f16e48, 0x14aa8e67ce0})
+	/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T/agentplane-p0-tools.jnjvrC/go-sdk/go/src/testing/testing.go:2125 +0x1a0
+testing.tRunner.func1()
+	/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T/agentplane-p0-tools.jnjvrC/go-sdk/go/src/testing/testing.go:2128 +0x2c8
+panic({0x106f16e48?, 0x14aa8e67ce0?})
+	/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T/agentplane-p0-tools.jnjvrC/go-sdk/go/src/runtime/panic.go:859 +0x120
+github.com/MenaceHecker/AgentPlane/internal/apitest.with(0x10701daf8?, {0x10701daf8, 0x14aa8dae330}, {0x14aa8fb7de8, 0x4, 0x4})
+	<home>/Dev/AgentPlane/internal/apitest/suite_test.go:289 +0x128
+github.com/MenaceHecker/AgentPlane/internal/apitest.TestAgentRolloutIsOptionalTypedDataWithItsOwnRequiredFields(0x14aa8e638c8)
+	<home>/Dev/AgentPlane/internal/apitest/agent_test.go:236 +0x1274
+testing.tRunner(0x14aa8e638c8, 0x107214d38)
+	/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T/agentplane-p0-tools.jnjvrC/go-sdk/go/src/testing/testing.go:2195 +0xc4
+created by testing.(*T).Run in goroutine 1
+	/var/folders/rs/w080hsd90pj8wp4ysx2_rpxw0000gn/T/agentplane-p0-tools.jnjvrC/go-sdk/go/src/testing/testing.go:2260 +0x3b8
+FAIL	github.com/MenaceHecker/AgentPlane/internal/apitest	5.354s
+FAIL
+make: *** [test-envtest] Error 1

@@ -1,0 +1,23 @@
+[36mINFO[0m Writing kustomize manifests for you to edit... 
+[36mINFO[0m Writing scaffold for you to edit... 
+[36mINFO[0m Get controller runtime 
+go: downloading sigs.k8s.io/controller-runtime v0.25.0
+[36mINFO[0m Update dependencies 
+go: downloading k8s.io/apiserver v0.37.0
+go: downloading go.uber.org/zap v1.27.1
+go: downloading github.com/go-openapi/swag/jsonutils/fixtures_test v0.27.1
+go: downloading github.com/go-openapi/testify/enable/yaml/v2 v2.6.0
+go: downloading k8s.io/component-base v0.37.0
+go: downloading k8s.io/streaming v0.37.0
+go: downloading google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa
+go: downloading cel.dev/expr v0.25.1
+go: downloading google.golang.org/grpc v1.82.1
+go: downloading sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0
+go: downloading go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0
+go: downloading golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f
+go: downloading go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0
+go: downloading go.opentelemetry.io/proto/otlp v1.10.0
+go: downloading github.com/cenkalti/backoff/v5 v5.0.3
+go: downloading github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
+Next: define a resource with:
+$ kubebuilder create api

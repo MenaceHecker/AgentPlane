@@ -1,0 +1,9 @@
+== kubebuilder
+	path	sigs.k8s.io/kubebuilder/v4
+	mod	sigs.k8s.io/kubebuilder/v4	v4.16.0	h1:ay3e//yOWy2Jmi3JZnF8esrtCi0+/6jiPXiRtmW0Wu8=
+== controller-gen
+	path	sigs.k8s.io/controller-tools/cmd/controller-gen
+	mod	sigs.k8s.io/controller-tools	v0.23.0	h1:GFmPTaHSyje/kZv/4XOdR1v3rWz0/OJixwpPnGyV4Sw=
+== setup-envtest
+	path	sigs.k8s.io/controller-runtime/tools/setup-envtest
+	mod	sigs.k8s.io/controller-runtime/tools/setup-envtest	v0.25.3	h1:6SzrgDmf8YueQ3IbX2cNQsg2Jkmy8FzP9dwWYYE7Vb8=
