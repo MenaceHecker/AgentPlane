@@ -1,6 +1,6 @@
 # AgentPlane progress
 
-Current phase: Phase 0 — foundations and design. No phase exit gate verified.
+Current phase: Phase 1 — planning only. Owner accepted the Phase 0 exit gate at `f25fc65e17aae84ea1bfd3acfcd9ed088b8cbd58`; Phase 1 implementation is not authorized.
 
 Phase plan: [P0 foundations and design](../agents/plans/P0.md), PLANNED. Planning branch: `phase-0/foundations-plan`. Task implementation stays on separate task branches.
 
@@ -57,12 +57,18 @@ DRAFT means planned but awaiting owner approval; PLANNED means the owner approve
 - Owner confirmed the root requirements document; P0-T0 corrects the stale AGENTS.md path. Document reviewed; NFR-8/NFR-9 mapped, full compliance remains future work.
 - P0-T0/P0-T1 historical merge/approval reconciliation is recorded in wrap-up review r1; later-task review coverage and the owner phase exit gate remain separate.
 - Owner decisions are ACCEPTED in P0-T2/P0-T3; no decision-approval blocker remains. Signed checkpoints are format-only in Phase 0. Task dependencies and owner phase exit gate remain.
-- Confirm the configured Git email is verified on the owner's GitHub account.
+- Configured Git email verification confirmed by the owner in the Phase 0 exit sign-off below; no account details published.
 
 ## Phase 0 exit gate (owner runs)
-- [ ] `make kind-up` creates the cluster; mock model returns identical output for identical input.
-- [ ] CI is green on `main`.
-- [ ] ADRs and OpenAPI are committed.
+
+**Owner sign-off (this session):** The owner confirmed that the configured Git email is verified on GitHub, accepted the recorded final acceptance evidence and deferrals, and adopted the preceding proposed exit-gate statement and instruction to prepare P1-T1 without implementation: “I confirm the configured Git email email is verified on my Github Account. I accept the recorded final acceptance evidence and deferrals. And whatever else you mention in the prompt above”. This records the owner's decision, not an agent declaring completion.
+
+Accepted main SHA: `f25fc65e17aae84ea1bfd3acfcd9ed088b8cbd58` ([PR #12](https://github.com/MenaceHecker/AgentPlane/pull/12)). [Final acceptance report](../agents/runs/P0-final-acceptance.md), [review APPROVE](../agents/reviews/P0-final-acceptance-r1.md), and [exact-main CI 46089390288](https://github.com/MenaceHecker/AgentPlane/actions/runs/46089390288) support the gate. Relevant source/config matches TESTED_SHA `f6dd6826b814d70d70b40555026bcfc5c2c44be5` (verified by the specified git diff). All five exact-main jobs passed. Accepted limits/deferrals remain: local kind/placement simulation only, no in-cluster serving or network-isolation claim, incomplete long repeats remain incomplete with historical evidence accepted, mutation work deferred without a score, and Bash-helper deletion deferred. Go was patched and scanned; no claim of historical exploitability or universal security.
+
+The local unstaged root-prompt deletion remains unrelated owner-managed workspace state; no deletion intent is inferred or staged. No further live run, cleanup, cloud/provider call, merge or Phase 1 implementation was authorized by recording this sign-off.
+- [x] `make kind-up` creates the cluster; mock model returns identical output for identical input.
+- [x] CI is green on `main`.
+- [x] ADRs and OpenAPI are committed.
 
 ## Next phase planning
 - [Phase 1 draft roadmap](../agents/plans/P1.md): P1-T1 through P1-T7 proposed, execution gated on owner-confirmed Phase 0 exit. Individual approved task plans still required.
