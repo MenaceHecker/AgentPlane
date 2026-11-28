@@ -6,11 +6,11 @@
 # Both base images are pinned by the digest of their multi-arch (amd64 and
 # arm64) OCI index, so the build is reproducible and a moved tag cannot change
 # it. Provenance and how to update them: docs/local-development.md.
-#   build:   golang:1.27.3-bookworm           (go.mod declares go 1.27.3)
+#   build:   golang:1.27.4-bookworm           (go.mod declares go 1.27.4)
 #   runtime: gcr.io/distroless/static-debian13:nonroot  (no shell, no package
 #            manager, no writable root requirement, user 65532)
 
-FROM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS build
+FROM golang:1.27.4-bookworm@sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34 AS build
 # GOTOOLCHAIN=local: never download a different toolchain during the build.
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly
 WORKDIR /src
