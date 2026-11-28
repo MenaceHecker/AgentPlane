@@ -1,0 +1,17 @@
+image-scan: scanning agentplane/mockmodel:p0 (docker image ID sha256:7b7e94278ff29f9f360c6159465a631337d5553e26edf669e552adbee10f741c) with Trivy 0.76.2
+image-scan: trivy: 2026-11-27T19:15:25-05:00	INFO	[vulndb] Need to update DB
+image-scan: trivy: 2026-11-27T19:15:25-05:00	INFO	[vulndb] Downloading vulnerability DB...
+image-scan: trivy: 2026-11-27T19:15:25-05:00	INFO	[vulndb] Downloading artifact...	repo="mirror.gcr.io/aquasec/trivy-db:2"
+image-scan: trivy: 2026-11-27T19:15:33-05:00	INFO	[vulndb] Artifact successfully downloaded	repo="mirror.gcr.io/aquasec/trivy-db:2"
+image-scan: trivy: 2026-11-27T19:15:33-05:00	INFO	Detected OS	family="debian" version="13.8"
+image-scan: trivy: 2026-11-27T19:15:33-05:00	INFO	Number of language-specific files	num=1
+image-scan: Trivy 0.76.2, vulnerability database v2 updated 2026-11-27T19:05:47.637500704Z, downloaded 2026-11-28T00:15:33.370533Z
+image-scan: evidence directory: <EVIDENCE_ROOT>/scan-evidence (trivy-report.json, trivy-version.json, scan.log)
+image-scan: scanner Trivy 0.76.2, image config digest sha256:68ed67e5ccba2619c6e8840c266db3a2d5e63c6a14434d05f7c311bb60fc5abd, OS debian 13.8
+image-scan: targets analyzed: <EVIDENCE_ROOT>/scan-evidence/image.tar (debian 13.8) (os-pkgs/debian); mockmodel (lang-pkgs/gobinary)
+image-scan: CRITICAL fixable 0, unfixed 0
+image-scan: HIGH     fixable 0, unfixed 0
+image-scan: MEDIUM   fixable 0, unfixed 0
+image-scan: LOW      fixable 0, unfixed 0
+image-scan: UNKNOWN  fixable 0, unfixed 0
+image-scan: GATE PASSED: no fixable HIGH or CRITICAL finding (all findings are listed above; none suppressed).

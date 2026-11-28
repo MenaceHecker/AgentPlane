@@ -1,0 +1,4 @@
+kindshape: config OK (Kubernetes v1.35.0, 1 control plane, pools map[system:1 tenant:1])
+kindshape: cluster matches the config (3 nodes)
+kind cluster 'agentplane-p0-exit' already exists and matches the supported topology; nothing to do.
+kind-cluster: your kubectl current context is '<PRIOR_CONTEXT_REDACTED>' (verified).

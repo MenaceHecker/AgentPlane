@@ -1,0 +1,32 @@
+[live-docker-version] cmd='docker version' exit=0 secs=0 lines=      27
+[live-kind-version] cmd='kind version' exit=0 secs=0 lines=       1
+[live-kubectl-version] cmd='kubectl version --client' exit=0 secs=0 lines=       2
+[live-trivy-version] cmd='trivy --version' exit=0 secs=0 lines=       6
+[live-kind-get-clusters-before] cmd='kind get clusters' exit=0 secs=0 lines=       1
+[live-context-before] cmd='kubectl config view -o jsonpath={.current-context}' exit=0 secs=0 lines=       0
+[live-contexts-before] cmd='kubectl config get-contexts -o name' exit=0 secs=0 lines=       2
+[live-find-before-up1] cmd='find <EVIDENCE_ROOT>/live-tmp -mindepth 1 -maxdepth 1 -print' exit=0 secs=0 lines=       0
+[live-kind-up-1] cmd='make kind-up KIND_CLUSTER_NAME=agentplane-p0-exit TMPDIR=<EVIDENCE_ROOT>/live-tmp' exit=0 secs=22 lines=      25
+[live-context-after-up1] cmd='kubectl config view -o jsonpath={.current-context}' exit=0 secs=0 lines=       0
+[live-find-after-up1] cmd='find <EVIDENCE_ROOT>/live-tmp -mindepth 1 -maxdepth 1 -print' exit=0 secs=0 lines=       0
+[live-clusters-after-up1] cmd='kind get clusters' exit=0 secs=0 lines=       1
+[live-wait-ready] cmd='kubectl --context kind-agentplane-p0-exit wait --for=condition=Ready nodes --all --timeout=180s' exit=0 secs=7 lines=       3
+[live-get-nodes] cmd='kubectl --context kind-agentplane-p0-exit get nodes -L agentplane.io/pool' exit=0 secs=0 lines=       4
+[live-tenant-nodes-json] cmd='kubectl --context kind-agentplane-p0-exit get nodes -l agentplane.io/pool=tenant -o json' exit=0 secs=0 lines=     223
+[live-node-uids-1] cmd='kubectl --context kind-agentplane-p0-exit get nodes -o custom-columns=NAME:.metadata.name,UID:.metadata.uid' exit=0 secs=0 lines=       4
+[live-kind-up-2] cmd='make kind-up KIND_CLUSTER_NAME=agentplane-p0-exit TMPDIR=<EVIDENCE_ROOT>/live-tmp' exit=0 secs=3 lines=       4
+[live-context-after-up2] cmd='kubectl config view -o jsonpath={.current-context}' exit=0 secs=0 lines=       0
+[live-find-after-up2] cmd='find <EVIDENCE_ROOT>/live-tmp -mindepth 1 -maxdepth 1 -print' exit=0 secs=0 lines=       0
+[live-node-uids-2] cmd='kubectl --context kind-agentplane-p0-exit get nodes -o custom-columns=NAME:.metadata.name,UID:.metadata.uid' exit=0 secs=0 lines=       4
+[live-clusters-after-up2] cmd='kind get clusters' exit=0 secs=0 lines=       1
+[live-kind-load] cmd='kind load docker-image agentplane/mockmodel:p0 --name agentplane-p0-exit' exit=0 secs=3 lines=       3
+[live-context-after-load] cmd='kubectl config view -o jsonpath={.current-context}' exit=0 secs=0 lines=       0
+[live-kind-down-1] cmd='make kind-down KIND_CLUSTER_NAME=agentplane-p0-exit TMPDIR=<EVIDENCE_ROOT>/live-tmp' exit=0 secs=2 lines=       3
+[live-context-after-down1] cmd='kubectl config view -o jsonpath={.current-context}' exit=0 secs=0 lines=       0
+[live-find-after-down1] cmd='find <EVIDENCE_ROOT>/live-tmp -mindepth 1 -maxdepth 1 -print' exit=0 secs=0 lines=       0
+[live-clusters-after-down1] cmd='kind get clusters' exit=0 secs=0 lines=       1
+[live-kind-down-2] cmd='make kind-down KIND_CLUSTER_NAME=agentplane-p0-exit TMPDIR=<EVIDENCE_ROOT>/live-tmp' exit=0 secs=1 lines=       2
+[live-context-after-down2] cmd='kubectl config view -o jsonpath={.current-context}' exit=0 secs=0 lines=       0
+[live-find-after-down2] cmd='find <EVIDENCE_ROOT>/live-tmp -mindepth 1 -maxdepth 1 -print' exit=0 secs=0 lines=       0
+[live-clusters-after-down2] cmd='kind get clusters' exit=0 secs=0 lines=       1
+[live-contexts-after] cmd='kubectl config get-contexts -o name' exit=0 secs=0 lines=       2

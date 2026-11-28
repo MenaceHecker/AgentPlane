@@ -1,0 +1,11 @@
+./mockmodel-binary: go1.27.4
+	path	github.com/MenaceHecker/AgentPlane/cmd/mockmodel
+	mod	github.com/MenaceHecker/AgentPlane	(devel)	
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	-trimpath=true
+	build	CGO_ENABLED=0
+	build	GOARCH=arm64
+	build	GOOS=linux
+	build	GOARM64=v8.0
+11f6f9c988fe7da288da991ad26eb44b763c4dd150310b403fd9c3853e5e7bf8  mockmodel-binary

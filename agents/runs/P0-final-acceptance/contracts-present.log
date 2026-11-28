@@ -1,0 +1,13 @@
+test -s docs/gateway/openapi.yaml -> 0
+test -s docs/audit/record.schema.json -> 0
+test -s docs/audit/hash-chain.md -> 0
+docs/adr/.gitkeep
+docs/adr/ADR-001-gitops.md
+docs/adr/ADR-002-audit-store.md
+docs/adr/ADR-003-sandbox.md
+docs/adr/ADR-004-budget-accounting.md
+docs/adr/ADR-005-contract-semantics.md
+docs/adr/ADR-006-audit-chain.md
+docs/adr/ADR-007-owned-process-supervision.md
+docs/adr/README.md
+docs/adr/template.md
